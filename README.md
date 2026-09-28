@@ -1,8 +1,9 @@
 # CSV Reshape Script
 
-`program.py` converts `original_csv.csv` (raw data-logger export) into the
-layout used by `target_format.CSV` (a Graphtec-style instrument format),
-writing the result to `reshaped_output.csv`.
+`program.py` converts a raw data-logger CSV (like `original_csv.csv`) into
+the layout used by `target_format.CSV` (a Graphtec-style instrument
+format). It takes an input file as a command-line argument and writes the
+reshaped result into an output folder, so you can run it once per file.
 
 ## What it does
 
@@ -76,8 +77,32 @@ the script will need to be updated to reproduce that formatting.
 ## Usage
 
 ```bash
-python3 program.py
+python3 program.py <path-to-input-csv> [-o OUTPUT_DIR] [-t TEMPLATE_CSV]
 ```
 
-Reads `original_csv.csv` and `target_format.CSV` from the current directory
-and writes `reshaped_output.csv`.
+- `<path-to-input-csv>` (required) — the raw CSV to reshape.
+- `-o`/`--output-dir` (optional, default `output`) — folder the reshaped
+  file is written into. Created automatically if it doesn't exist.
+- `-t`/`--template` (optional, default `target_format.CSV` next to
+  `program.py`) — the template file whose header rows and column mapping
+  are used.
+
+The output file is named `<input file name>_reshaped.csv` inside the
+output folder. For example:
+
+```bash
+python3 program.py original_csv.csv
+# -> output/original_csv_reshaped.csv
+
+python3 program.py another_run.csv -o results
+# -> results/another_run_reshaped.csv
+```
+
+To process several files, run the script once per file (e.g. in a shell
+loop):
+
+```bash
+for f in data/*.csv; do
+    python3 program.py "$f" -o output
+done
+```

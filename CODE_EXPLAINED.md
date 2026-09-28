@@ -1,8 +1,17 @@
 # Understanding `program.py`: the `with` statement, `open()`, and the main function
 
-This walks through the file-handling and data-writing part of `program.py`
-(the `main()` function), explaining the Python concepts it uses. Line
-numbers refer to the current `program.py`.
+This walks through the file-handling and data-writing part of `program.py`,
+explaining the Python concepts it uses.
+
+> **Note:** this originally described a single `main()` function that read
+> hardcoded file paths. `program.py` has since been generalized into a
+> command-line tool: the file-handling logic below now lives in its own
+> `reshape_csv(input_file, output_dir, template_file)` function, and
+> `main()` just parses command-line arguments (via `argparse`) and calls
+> it. The concepts and the core logic explained below (the `with`
+> statement, `open()`, reading the header block, the `csv` module, the
+> per-row loop) are unchanged — only the line numbers and the fact that
+> file paths now come from arguments instead of constants have moved.
 
 ## The `open()` function
 
