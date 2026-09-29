@@ -2,9 +2,9 @@
 
 `program.py` converts a raw data-logger CSV (like `original_csv.csv`) into
 the layout used by `target_format.CSV` (a Graphtec-style instrument
-format). It takes the input file, an output folder, and an output file
-name as arguments, so you can run it once per file and control exactly
-where each result goes.
+format). Running it prompts you for the input directory, the input file
+name, the output directory, and the output file name, so you can run it
+once per file and control exactly where each result goes.
 
 ## What it does
 
@@ -78,54 +78,39 @@ the script will need to be updated to reproduce that formatting.
 ## Usage
 
 ```bash
-python3 program.py <input_file> <output_dir> <output_filename> [-t TEMPLATE_CSV]
+python3 program.py
 ```
 
-- `<input_file>` (required) — path to the raw CSV to reshape.
-- `<output_dir>` (required) — folder to write the reshaped CSV into.
-  Created automatically if it doesn't exist.
-- `<output_filename>` (required) — file name for the reshaped CSV, e.g.
-  `result.csv`. `.csv` is appended automatically if you leave it off.
-- `-t`/`--template` (optional, default `target_format.CSV` next to
-  `program.py`) — the template file whose header rows and column mapping
-  are used.
+Running the script (from a terminal or as a Spyder "Run file") prompts
+for four things, in order:
 
-Example:
-
-```bash
-python3 program.py original_csv.csv output my_result.csv
-# -> output/my_result.csv
+```
+Directory containing the file to be reshaped: data
+Name of the file to be reshaped: original_csv.csv
+Destination directory for the output: output
+Name to give the output CSV file: my_result.csv
 ```
 
-To process several files, run the script once per file (e.g. in a shell
-loop), choosing a distinct output filename each time:
-
-```bash
-for f in data/*.csv; do
-    name="$(basename "$f" .csv)"
-    python3 program.py "$f" output "${name}_reshaped.csv"
-done
-```
+which reshapes `data/original_csv.csv` and writes the result to
+`output/my_result.csv` (`.csv` is appended automatically if you leave it
+off the output name). Run the script again to process another file.
 
 ## Using it from Spyder
 
-Spyder's "Run file" (F5) runs the script with no command-line arguments,
-which isn't how the CLI above works. Instead, `program.py` is written so
-that:
+`input()` works the same in Spyder's IPython console as it does in a
+terminal, so pressing **F5** (Run file) prompts for the same four values
+right there in the console.
 
-1. Pressing **F5** (or Run) loads all of the script's functions —
-   including `reshape_csv()` — into the IPython console, and prints a
-   short reminder instead of trying (and failing) to parse CLI arguments.
-2. You then call `reshape_csv()` directly in the console, once per file:
+If you'd rather skip the prompts and call the reshaping logic directly —
+e.g. to process several files in a loop without re-running the script each
+time — `reshape_csv()` is a plain function you can call yourself once
+`program.py` has been run once (F5) to load it into the console:
 
-   ```python
-   reshape_csv("original_csv.csv", "output", "my_result.csv")
-   reshape_csv("another_run.csv", "results", "another_result.csv")
-   ```
+```python
+reshape_csv("data/original_csv.csv", "output", "my_result.csv")
+reshape_csv("data/another_run.csv", "output", "another_result.csv")
+```
 
-   Relative paths are resolved against Spyder's current working directory
-   (shown in its "Files"/toolbar, and changeable there), so either `cd` to
-   the folder with your CSVs first or pass full paths.
-
-Running `python program.py <file>` from an actual terminal still uses the
-normal CLI described above — the two ways of running it don't conflict.
+Relative paths are resolved against Spyder's current working directory
+(shown in its "Files"/toolbar, and changeable there), so either `cd` to
+the folder with your CSVs first or pass full paths.

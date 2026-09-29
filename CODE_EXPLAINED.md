@@ -3,16 +3,15 @@
 This walks through the file-handling and data-writing part of `program.py`,
 explaining the Python concepts it uses.
 
-> **Note:** this originally described a single `main()` function that read
-> hardcoded file paths. `program.py` has since been generalized into a
-> command-line tool: the file-handling logic below now lives in its own
-> `reshape_csv(input_file, output_dir, output_filename, template_file)`
-> function, and
-> `main()` just parses command-line arguments (via `argparse`) and calls
-> it. The concepts and the core logic explained below (the `with`
-> statement, `open()`, reading the header block, the `csv` module, the
-> per-row loop) are unchanged — only the line numbers and the fact that
-> file paths now come from arguments instead of constants have moved.
+> **Note:** this originally described a single `main()` function that did
+> all the file handling itself. `program.py` has since been split into two
+> functions: `reshape_csv(input_file, output_dir, output_filename,
+> template_file)` does the actual file reading/writing (the part walked
+> through below), and `main()` just asks the user four questions with
+> `input()` and passes the answers to `reshape_csv()`. The core logic
+> explained below (the `with` statement, `open()`, reading the header
+> block, the `csv` module, the per-row loop) is unchanged — only which
+> function it lives in, and where its arguments come from, has moved.
 
 ## The `open()` function
 
@@ -64,19 +63,19 @@ error occurs).
 You can open more than one file in a single `with` by separating them with
 commas — that's what line 62–63 below does.
 
-## Walking through `main()`
+## Walking through `reshape_csv()`
 
-### Line 59 — open the template, read-only
+### Line 67 — open the template, read-only
 
 ```python
-with open(TEMPLATE_FILE, "r", newline="") as f:
+with open(template_file, "r", newline="") as f:
 ```
 
-Opens `target_format.CSV` for reading and names the resulting file object
-`f`. It will be automatically closed once the indented block under this
-`with` ends (i.e. right after line 60).
+Opens the template file (`target_format.CSV` by default) for reading and
+names the resulting file object `f`. It will be automatically closed once
+the indented block under this `with` ends (i.e. right after line 68).
 
-### Line 60 — read the first N lines
+### Line 68 — read the first N lines
 
 ```python
 header_lines = [next(f) for _ in range(HEADER_LINE_COUNT)]
@@ -95,30 +94,51 @@ repeating an expression. Reading it right to left:
   call to `next()` returns the *following* line.
 - Wrapping it in `[...]` collects each line returned into a list.
 
-So this line reads the first 11 lines of `target_format.CSV` (the
+So this line reads the first 11 lines of the template file (the
 metadata/header block) into the list `header_lines`, one line of text per
 list element, and leaves the file positioned right after them — though
 that no longer matters here, since the file is closed as soon as this
 `with` block ends.
 
-### Lines 62–63 — open two more files at once
+### Lines 70–74 — figure out the output path
 
 ```python
-with open(INPUT_FILE, "r", newline="") as infile, \
-     open(OUTPUT_FILE, "w", newline="") as outfile:
+if not output_filename.lower().endswith(".csv"):
+    output_filename += ".csv"
+
+os.makedirs(output_dir, exist_ok=True)
+output_file = os.path.join(output_dir, output_filename)
+```
+
+- The `if` appends `.csv` to `output_filename` when it isn't already
+  there (case-insensitively, via `.lower()`), so `"result"` and
+  `"result.csv"` both end up as `"result.csv"`.
+- `os.makedirs(output_dir, exist_ok=True)` creates the output folder
+  (including any missing parent folders) if it doesn't already exist.
+  `exist_ok=True` means "don't raise an error if it's already there" —
+  without it, `makedirs` would fail on the second run.
+- `os.path.join(output_dir, output_filename)` combines the folder and file
+  name into one path, using the correct separator for the operating
+  system (`/` on Linux/macOS, `\` on Windows).
+
+### Lines 76–77 — open the input and output files at once
+
+```python
+with open(input_file, "r", newline="") as infile, \
+     open(output_file, "w", newline="") as outfile:
 ```
 
 A second `with` statement, this time opening **two** files at once,
-separated by a comma: `original_csv.csv` for reading (as `infile`) and
-`reshaped_output.csv` for writing (as `outfile`). Both stay open for the
-whole indented block below (lines 65–77) and are both automatically closed
+separated by a comma: the input CSV for reading (as `infile`) and the
+computed output path for writing (as `outfile`). Both stay open for the
+whole indented block below (lines 79–91) and are both automatically closed
 together when that block ends.
 
-The trailing `\` on line 62 is a **line continuation** — it just tells
+The trailing `\` on line 76 is a **line continuation** — it just tells
 Python "this statement keeps going on the next line," purely so the line
 isn't too long to read comfortably. It has no other effect.
 
-### Line 65 — write the copied header lines to the output
+### Line 79 — write the copied header lines to the output
 
 ```python
 outfile.writelines(header_lines)
@@ -126,11 +146,11 @@ outfile.writelines(header_lines)
 
 `writelines()` writes a list of strings to a file, one after another,
 without adding anything extra between them (unlike `print`, it does *not*
-insert its own newlines — that's why line 60 needed to keep each line's
+insert its own newlines — that's why line 68 needed to keep each line's
 original trailing `\n` from the file). This writes the 11 header lines
-captured earlier straight into `reshaped_output.csv`, unchanged.
+captured earlier straight into the output file, unchanged.
 
-### Lines 67–68 — set up CSV reading and writing
+### Lines 81–82 — set up CSV reading and writing
 
 ```python
 reader = csv.DictReader(infile)
@@ -138,8 +158,8 @@ writer = csv.writer(outfile)
 ```
 
 - `csv.DictReader(infile)` wraps the already-open `infile` so that each
-  row it produces is a **dictionary** keyed by column name (taken from
-  `original_csv.csv`'s first line), e.g.
+  row it produces is a **dictionary** keyed by column name (taken from the
+  input file's first line), e.g.
   `{"CH1_1": "25.5", "CH1_2": "25.41", ...}`. That's what lets the rest of
   the code look up columns by name (`row["CH1_1"]`) instead of by
   position.
@@ -147,7 +167,7 @@ writer = csv.writer(outfile)
   a plain Python list and have it correctly formatted as one CSV row
   (handling commas, quoting, etc.) and written out.
 
-### Lines 71–77 — build and write one output row per input row
+### Lines 84–91 — build and write one output row per input row
 
 ```python
 for row in reader:
@@ -160,8 +180,8 @@ for row in reader:
     writer.writerow(data_row)
 ```
 
-- `for row in reader:` — iterates over `original_csv.csv` one row at a
-  time; each `row` is a dictionary as described above.
+- `for row in reader:` — iterates over the input CSV one row at a time;
+  each `row` is a dictionary as described above.
 - `data_row = [row[TIME_SOURCE_COLUMN]]` — starts a new list for this
   output row, with the Time value first (`TIME_SOURCE_COLUMN` is
   `"TimeFromRecordStart_s"`).
@@ -180,13 +200,43 @@ for row in reader:
   written row ends with a trailing comma — matching the trailing comma
   seen in every data row of `target_format.CSV`.
 - `writer.writerow(data_row)` finally converts `data_row` (a plain list of
-  strings) into one correctly-formatted CSV line and writes it to
-  `reshaped_output.csv`.
+  strings) into one correctly-formatted CSV line and writes it to the
+  output file.
 
-This loop body runs once per row of `original_csv.csv`, so it produces
-exactly one output row per input row.
+This loop body runs once per row of the input CSV, so it produces exactly
+one output row per input row. After the loop, line 93 (`return
+output_file`) hands back the path that was written, so callers (like
+`main()`, below) can report it.
 
-### Lines 82–83 — the script entry point
+## `main()` — asking for the four inputs
+
+```python
+def main():
+    input_dir = input("Directory containing the file to be reshaped: ").strip()
+    input_filename = input("Name of the file to be reshaped: ").strip()
+    output_dir = input("Destination directory for the output: ").strip()
+    output_filename = input("Name to give the output CSV file: ").strip()
+
+    input_file = os.path.join(input_dir, input_filename)
+    output_file = reshape_csv(input_file, output_dir, output_filename)
+    print(f"Wrote reshaped data to {output_file}")
+```
+
+- `input("some prompt: ")` is Python's built-in for interactive text
+  input: it prints the prompt string, pauses execution, and returns
+  whatever the user types (as a string) once they press Enter. It works
+  identically whether the code is run from a terminal or from an IDE
+  console like Spyder's — both just wait for you to type something.
+- `.strip()` removes any leading/trailing whitespace (spaces, or an
+  accidentally-included newline) from what was typed, so a stray space
+  before or after a path doesn't break the file lookup.
+- `os.path.join(input_dir, input_filename)` combines the directory and
+  file name the user typed into one path, the same way line 74 does for
+  the output side.
+- The last two lines call `reshape_csv()` with the four collected values
+  and print where the result went.
+
+### The script entry point
 
 ```python
 if __name__ == "__main__":
