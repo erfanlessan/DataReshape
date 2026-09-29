@@ -6,7 +6,8 @@ explaining the Python concepts it uses.
 > **Note:** this originally described a single `main()` function that read
 > hardcoded file paths. `program.py` has since been generalized into a
 > command-line tool: the file-handling logic below now lives in its own
-> `reshape_csv(input_file, output_dir, template_file)` function, and
+> `reshape_csv(input_file, output_dir, output_filename, template_file)`
+> function, and
 > `main()` just parses command-line arguments (via `argparse`) and calls
 > it. The concepts and the core logic explained below (the `with`
 > statement, `open()`, reading the header block, the `csv` module, the
