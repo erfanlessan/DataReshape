@@ -106,3 +106,26 @@ for f in data/*.csv; do
     python3 program.py "$f" -o output
 done
 ```
+
+## Using it from Spyder
+
+Spyder's "Run file" (F5) runs the script with no command-line arguments,
+which isn't how the CLI above works. Instead, `program.py` is written so
+that:
+
+1. Pressing **F5** (or Run) loads all of the script's functions —
+   including `reshape_csv()` — into the IPython console, and prints a
+   short reminder instead of trying (and failing) to parse CLI arguments.
+2. You then call `reshape_csv()` directly in the console, once per file:
+
+   ```python
+   reshape_csv("original_csv.csv")
+   reshape_csv("another_run.csv", "results")  # custom output folder
+   ```
+
+   Relative paths are resolved against Spyder's current working directory
+   (shown in its "Files"/toolbar, and changeable there), so either `cd` to
+   the folder with your CSVs first or pass full paths.
+
+Running `python program.py <file>` from an actual terminal still uses the
+normal CLI described above — the two ways of running it don't conflict.

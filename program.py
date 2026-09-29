@@ -8,8 +8,14 @@ Created on Mon Sep 28 12:54:44 2026
 import argparse
 import csv
 import os
+import sys
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Falls back to the current working directory if __file__ isn't defined
+# (e.g. when this file's code is run via exec() rather than as a script).
+if "__file__" in globals():
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+else:
+    SCRIPT_DIR = os.getcwd()
 DEFAULT_TEMPLATE_FILE = os.path.join(SCRIPT_DIR, "target_format.CSV")
 
 # Number of leading metadata/header lines in the template that describe the
@@ -56,7 +62,7 @@ ALARM_SOURCE_PLACEHOLDER = ["", "", "", ""]
 EVENT_PLACEHOLDER = "0"
 
 
-def reshape_csv(input_file, output_dir, template_file=DEFAULT_TEMPLATE_FILE):
+def reshape_csv(input_file, output_dir="output", template_file=DEFAULT_TEMPLATE_FILE):
     """Reshape a single input CSV into the target format and write it into
     output_dir. Returns the path of the file that was written."""
     with open(template_file, "r", newline="") as f:
@@ -106,4 +112,23 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Spyder's "Run file" (F5) executes this file with no extra command-line
+    # arguments, which would otherwise make argparse fail below demanding
+    # input_file. When that's the case, skip the CLI and just leave
+    # reshape_csv() (and everything else above) defined in the console, so
+    # it can be called directly and interactively, e.g.:
+    #
+    #   >>> reshape_csv("original_csv.csv")
+    #   >>> reshape_csv("another_run.csv", "results")
+    #
+    # Running from an actual terminal with arguments (e.g.
+    # `python program.py original_csv.csv`) still uses the normal CLI.
+    if len(sys.argv) > 1:
+        main()
+    else:
+        print(
+            "No command-line arguments given, so nothing was run.\n"
+            "Call reshape_csv() directly from the console instead, e.g.:\n"
+            "    reshape_csv('original_csv.csv')\n"
+            "    reshape_csv('original_csv.csv', 'results')"
+        )
