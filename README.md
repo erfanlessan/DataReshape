@@ -8,13 +8,16 @@ once per file and control exactly where each result goes.
 
 ## What it does
 
-1. **Copies the header/metadata rows as-is.** The first 11 lines of
-   `target_format.CSV` (`File name`, `Title comment`, `Trigger Time`, `Ch`,
-   `Mode`, `Range`, `Comment`, `Scaling`, `Ratio`, `Offset`, and the
-   `Time`/units row: `"Time","1-1[V]","1-2[V]",...,"Event",`) describe the
-   instrument format itself. `original_csv.csv` has no equivalent metadata,
-   so these 11 lines are copied verbatim from the template into the output
-   file, unchanged.
+1. **Copies the header/metadata rows from the template.** The first 11
+   lines of `target_format.CSV` (`File name`, `Title comment`, `Trigger
+   Time`, `Ch`, `Mode`, `Range`, `Comment`, `Scaling`, `Ratio`, `Offset`,
+   and the `Time`/units row: `"Time","1-1[V]","1-2[V]",...,"Event",`)
+   describe the instrument format itself. `original_csv.csv` has no
+   equivalent metadata, so these 11 lines are copied from the template
+   into the output file, with one change: **cell B1** (the second field of
+   the `"File name",...` row) is replaced with the name given to the
+   output file, instead of the template's own file name
+   (`GAVIML00.CSV`).
 
 2. **Builds the `Time` column from `TimeFromRecordStart_s`.** The target
    format's `Time` column values (`0, 0.1, 0.2, ...`) match

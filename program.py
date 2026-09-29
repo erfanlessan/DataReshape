@@ -6,6 +6,7 @@ Created on Mon Sep 28 12:54:44 2026
 """
 
 import csv
+import io
 import os
 
 # Falls back to the current working directory if __file__ isn't defined
@@ -69,6 +70,15 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
 
     if not output_filename.lower().endswith(".csv"):
         output_filename += ".csv"
+
+    # Header row 1 is `"File name","<name>","<version>"` in the template
+    # (e.g. "GAVIML00.CSV"). Replace cell B1 with the name being given to
+    # this output file.
+    first_row = next(csv.reader([header_lines[0]]))
+    first_row[1] = output_filename
+    buf = io.StringIO()
+    csv.writer(buf, lineterminator="\n", quoting=csv.QUOTE_ALL).writerow(first_row)
+    header_lines[0] = buf.getvalue()
 
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, output_filename)
