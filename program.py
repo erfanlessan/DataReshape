@@ -5,10 +5,8 @@ Created on Mon Sep 28 12:54:44 2026
 @author: lesser01
 """
 
-import argparse
 import csv
 import os
-import sys
 
 # Falls back to the current working directory if __file__ isn't defined
 # (e.g. when this file's code is run via exec() rather than as a script).
@@ -96,39 +94,18 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Reshape a data-logger CSV into the target_format.CSV layout."
-    )
-    parser.add_argument("input_file", help="Path to the CSV file to reshape")
-    parser.add_argument("output_dir", help="Folder to write the reshaped CSV into")
-    parser.add_argument("output_filename", help="File name for the reshaped CSV (e.g. result.csv)")
-    parser.add_argument(
-        "-t", "--template", default=DEFAULT_TEMPLATE_FILE,
-        help=f"Path to the target format template CSV (default: {DEFAULT_TEMPLATE_FILE})",
-    )
-    args = parser.parse_args()
+    """Prompt for the four pieces of information needed to reshape one
+    file, then do it. Works the same whether run from a terminal or from
+    Spyder's console (both support input())."""
+    input_dir = input("Directory containing the file to be reshaped: ").strip()
+    input_filename = input("Name of the file to be reshaped: ").strip()
+    output_dir = input("Destination directory for the output: ").strip()
+    output_filename = input("Name to give the output CSV file: ").strip()
 
-    output_file = reshape_csv(args.input_file, args.output_dir, args.output_filename, args.template)
+    input_file = os.path.join(input_dir, input_filename)
+    output_file = reshape_csv(input_file, output_dir, output_filename)
     print(f"Wrote reshaped data to {output_file}")
 
 
 if __name__ == "__main__":
-    # Spyder's "Run file" (F5) executes this file with no extra command-line
-    # arguments, which would otherwise make argparse fail below demanding
-    # input_file/output_dir/output_filename. When that's the case, skip the
-    # CLI and just leave reshape_csv() (and everything else above) defined
-    # in the console, so it can be called directly and interactively, e.g.:
-    #
-    #   >>> reshape_csv("original_csv.csv", "output", "reshaped.csv")
-    #
-    # Running from an actual terminal with arguments (e.g.
-    # `python program.py original_csv.csv output reshaped.csv`) still uses
-    # the normal CLI.
-    if len(sys.argv) > 1:
-        main()
-    else:
-        print(
-            "No command-line arguments given, so nothing was run.\n"
-            "Call reshape_csv() directly from the console instead, e.g.:\n"
-            "    reshape_csv('original_csv.csv', 'output', 'reshaped.csv')"
-        )
+    main()
