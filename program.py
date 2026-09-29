@@ -13,8 +13,9 @@ OUTPUT_FILE = "reshaped_output.csv"
 
 # Number of leading metadata/header lines in the template that describe the
 # instrument format (File name, Title comment, Trigger Time, Ch, Mode,
-# Range, Comment, Scaling, Ratio, Offset, Time) and are copied as-is.
-HEADER_LINE_COUNT = 10
+# Range, Comment, Scaling, Ratio, Offset, and the Time/units row: "Time",
+# "1-1[V]", "1-2[V]", ...) and are copied as-is.
+HEADER_LINE_COUNT = 11
 
 # Target data column (in output order) -> source column in original_csv.csv
 # Order matches the "Comment" row of target_format.CSV.
