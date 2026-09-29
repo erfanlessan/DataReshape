@@ -62,15 +62,18 @@ ALARM_SOURCE_PLACEHOLDER = ["", "", "", ""]
 EVENT_PLACEHOLDER = "0"
 
 
-def reshape_csv(input_file, output_dir="output", template_file=DEFAULT_TEMPLATE_FILE):
-    """Reshape a single input CSV into the target format and write it into
-    output_dir. Returns the path of the file that was written."""
+def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_TEMPLATE_FILE):
+    """Reshape a single input CSV into the target format and write it to
+    output_dir/output_filename. Returns the path of the file that was
+    written."""
     with open(template_file, "r", newline="") as f:
         header_lines = [next(f) for _ in range(HEADER_LINE_COUNT)]
 
+    if not output_filename.lower().endswith(".csv"):
+        output_filename += ".csv"
+
     os.makedirs(output_dir, exist_ok=True)
-    input_name = os.path.splitext(os.path.basename(input_file))[0]
-    output_file = os.path.join(output_dir, f"{input_name}_reshaped.csv")
+    output_file = os.path.join(output_dir, output_filename)
 
     with open(input_file, "r", newline="") as infile, \
          open(output_file, "w", newline="") as outfile:
@@ -97,38 +100,35 @@ def main():
         description="Reshape a data-logger CSV into the target_format.CSV layout."
     )
     parser.add_argument("input_file", help="Path to the CSV file to reshape")
-    parser.add_argument(
-        "-o", "--output-dir", default="output",
-        help="Folder to write the reshaped CSV into (default: output)",
-    )
+    parser.add_argument("output_dir", help="Folder to write the reshaped CSV into")
+    parser.add_argument("output_filename", help="File name for the reshaped CSV (e.g. result.csv)")
     parser.add_argument(
         "-t", "--template", default=DEFAULT_TEMPLATE_FILE,
         help=f"Path to the target format template CSV (default: {DEFAULT_TEMPLATE_FILE})",
     )
     args = parser.parse_args()
 
-    output_file = reshape_csv(args.input_file, args.output_dir, args.template)
+    output_file = reshape_csv(args.input_file, args.output_dir, args.output_filename, args.template)
     print(f"Wrote reshaped data to {output_file}")
 
 
 if __name__ == "__main__":
     # Spyder's "Run file" (F5) executes this file with no extra command-line
     # arguments, which would otherwise make argparse fail below demanding
-    # input_file. When that's the case, skip the CLI and just leave
-    # reshape_csv() (and everything else above) defined in the console, so
-    # it can be called directly and interactively, e.g.:
+    # input_file/output_dir/output_filename. When that's the case, skip the
+    # CLI and just leave reshape_csv() (and everything else above) defined
+    # in the console, so it can be called directly and interactively, e.g.:
     #
-    #   >>> reshape_csv("original_csv.csv")
-    #   >>> reshape_csv("another_run.csv", "results")
+    #   >>> reshape_csv("original_csv.csv", "output", "reshaped.csv")
     #
     # Running from an actual terminal with arguments (e.g.
-    # `python program.py original_csv.csv`) still uses the normal CLI.
+    # `python program.py original_csv.csv output reshaped.csv`) still uses
+    # the normal CLI.
     if len(sys.argv) > 1:
         main()
     else:
         print(
             "No command-line arguments given, so nothing was run.\n"
             "Call reshape_csv() directly from the console instead, e.g.:\n"
-            "    reshape_csv('original_csv.csv')\n"
-            "    reshape_csv('original_csv.csv', 'results')"
+            "    reshape_csv('original_csv.csv', 'output', 'reshaped.csv')"
         )
