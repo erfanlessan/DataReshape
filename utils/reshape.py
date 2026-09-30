@@ -118,7 +118,12 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
     # expects: Time, then every mapped channel (renamed/reordered per
     # COLUMN_MAP), then the ALM/Event placeholders and a trailing empty
     # field.
-    output = pd.DataFrame({"Time": data[TIME_SOURCE_COLUMN]})
+    # Time is re-based to start at 0 (rather than TimeFromTrigger_s's own
+    # negative starting value), by subtracting the first selected row's
+    # value from every row; the trigger-centered row selection above is
+    # unaffected, since it already ran on the original values.
+    time_values = data[TIME_SOURCE_COLUMN]
+    output = pd.DataFrame({"Time": time_values - time_values.iloc[0]})
     for target_col, source_col in COLUMN_MAP.items():
         output[target_col] = data[source_col]
     for column in ALM_COLUMNS:
