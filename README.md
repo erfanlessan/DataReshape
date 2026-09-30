@@ -1,11 +1,28 @@
 # CSV Reshape Script
 
-`program.py` converts a raw data-logger CSV (like `original_csv.csv`) into
-the layout used by `target_format.CSV` (a Graphtec-style instrument
-format). `reshape_csv()` handles one file at a time; `main()` batches this
-over a fixed set of per-channel subfolders (IGBT/FRD × UU/UL/VU/VL/WU/WL)
-under a single root directory you're asked for once, writing one named
-output file per channel.
+Converts a raw data-logger CSV (like `original_csv.csv`) into the layout
+used by `target_format.CSV` (a Graphtec-style instrument format).
+`utils/reshape.py`'s `reshape_csv()` handles one file at a time;
+`program.py`'s `main()` batches this over a fixed set of per-channel
+subfolders (IGBT/FRD × UU/UL/VU/VL/WU/WL) under a single root directory
+you're asked for once, writing one named output file per channel.
+
+## Project layout
+
+```
+program.py             entry point: the channel mapping and main()
+utils/
+    reshape.py          reshape_csv() and its column mapping/constants
+    folder_lookup.py     find_channel_folder(), the per-channel folder finder
+target_format.CSV      the instrument-format template (header rows + column layout)
+data_reshape.md         the original CH1_x/CH2_x -> named-column mapping spec
+```
+
+`program.py` imports `reshape_csv` and `find_channel_folder` from `utils`
+and focuses on orchestration: the `CHANNEL_FOLDER_TO_OUTPUT_NAME` mapping
+and the batch loop in `main()`. Everything reusable — reading the
+template, building each output row, locating a channel's folder — lives
+in `utils/`.
 
 ## What it does
 
@@ -93,7 +110,7 @@ Root directory containing the channel folders (e.g. .../RawData): C:\...\8_data\
 ```
 
 It then loops over `CHANNEL_FOLDER_TO_OUTPUT_NAME` (defined near the top
-of `main()` in `program.py`), and for each channel:
+of `program.py`, above `main()`), and for each channel:
 
 1. Searches directly inside the root directory for the one subfolder whose
    name *ends with* that channel's suffix (e.g. `UU_IGBT` matches
@@ -117,11 +134,21 @@ at the top of `main()`:
 
 ### Reshaping a single file instead
 
-`reshape_csv(input_file, output_dir, output_filename)` is the underlying
-function `main()` calls per channel, and remains a plain function you can
-call yourself for one file at a time — from a terminal (after adding a
-small script around it), or interactively from Spyder's console once
-`program.py` has been run (F5) to load it:
+`reshape_csv(input_file, output_dir, output_filename)`, in
+`utils/reshape.py`, is the underlying function `main()` calls per channel,
+and remains a plain function you can call yourself for one file at a
+time. From a terminal or your own script:
+
+```python
+from utils.reshape import reshape_csv
+
+reshape_csv("data/original_csv.csv", "output", "my_result.csv")
+```
+
+Or interactively from Spyder's console, once `program.py` has been run
+(F5) — its `from utils.reshape import reshape_csv` line at the top makes
+`reshape_csv` available in the console too, without needing to repeat the
+import:
 
 ```python
 reshape_csv("data/original_csv.csv", "output", "my_result.csv")

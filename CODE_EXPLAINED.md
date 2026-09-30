@@ -1,20 +1,29 @@
-# Understanding `program.py`: the `with` statement, `open()`, and the main function
+# Understanding the project: the `with` statement, `open()`, and how the files fit together
 
-This walks through the file-handling and data-writing part of `program.py`,
-explaining the Python concepts it uses.
+This walks through the file-handling and data-writing code, explaining
+the Python concepts it uses.
 
 > **Note:** this originally described a single `main()` function that did
-> all the file handling itself. `program.py` has since been split up:
-> `reshape_csv(input_file, output_dir, output_filename, template_file)`
-> does the actual file reading/writing for one file (the part walked
-> through first, below); `find_channel_folder()` locates one channel's
-> input folder by name pattern; and `main()` asks for one root directory,
-> then loops over a fixed channel-to-output-name mapping, calling the
-> other two functions once per channel. The core file-handling logic
-> explained first below (the `with` statement, `open()`, reading the
-> header block, the `csv` module, the per-row loop) is unchanged — only
-> which function it lives in, and where its arguments come from, has
-> moved.
+> all the file handling itself, all in one file. The project has since
+> been split into three files:
+>
+> - `utils/reshape.py` — `reshape_csv(input_file, output_dir,
+>   output_filename, template_file)` does the actual file reading/writing
+>   for one file (the part walked through first, below), plus the
+>   constants it needs (`COLUMN_MAP`, `HEADER_LINE_COUNT`, etc.).
+> - `utils/folder_lookup.py` — `find_channel_folder()` locates one
+>   channel's input folder by name pattern.
+> - `program.py` — imports both of the above and just does the
+>   orchestration: the `CHANNEL_FOLDER_TO_OUTPUT_NAME` mapping and
+>   `main()`, which asks for one root directory, then loops over that
+>   mapping, calling the other two functions once per channel.
+>
+> The core file-handling logic explained first below (the `with`
+> statement, `open()`, reading the header block, the `csv` module, the
+> per-row loop) is unchanged — only which file/function it lives in, and
+> where its arguments come from, has moved. A section further down,
+> ["How `program.py` finds the other two files"](#how-programpy-finds-the-other-two-files),
+> explains the `import` lines this split introduced.
 
 ## The `open()` function
 
@@ -64,9 +73,38 @@ to forget the `try`/`finally` and accidentally leave a file open if an
 error occurs).
 
 You can open more than one file in a single `with` by separating them with
-commas — that's what lines 86–87 below do.
+commas — that's what lines 87–90 below do.
 
-## Walking through `reshape_csv()`
+## How `program.py` finds the other two files
+
+```python
+import os
+
+from utils.folder_lookup import find_channel_folder
+from utils.reshape import reshape_csv
+```
+
+- `utils/` is a **package** — a folder Python treats as an importable
+  unit. What makes it one (rather than just an ordinary folder) is the
+  presence of `utils/__init__.py`. That file is empty here — it doesn't
+  need any content — its mere existence is what tells Python "this
+  folder can be imported from."
+- `from utils.folder_lookup import find_channel_folder` means: look
+  inside the `utils` package, find the module `folder_lookup` (i.e.
+  `utils/folder_lookup.py`), and from it, pull out the one name
+  `find_channel_folder` — after this line, `find_channel_folder` can be
+  used directly in `program.py`, exactly as if it had been defined there.
+  The second `from utils.reshape import reshape_csv` line does the same
+  for `reshape_csv`, from `utils/reshape.py`.
+- For `import utils...` to work at all, Python has to know where to look
+  for the `utils` folder. It finds it because Python automatically adds
+  the directory containing the script you're running (here,
+  `program.py`'s own folder) to the list of places it searches for
+  imports — so `utils/`, sitting right next to `program.py`, is found
+  without any extra setup. This is true whether you run
+  `python3 program.py` from a terminal or press **F5** in Spyder.
+
+## Walking through `reshape_csv()` (in `utils/reshape.py`)
 
 ### Line 68 — open the template, read-only
 
@@ -167,24 +205,32 @@ output_file = os.path.join(output_dir, output_filename)
   name into one path, using the correct separator for the operating
   system (`/` on Linux/macOS, `\` on Windows).
 
-### Lines 86–87 — open the input and output files at once
+### Lines 87–90 — open the input and output files at once
 
 ```python
-with open(input_file, "r", newline="") as infile, \
-     open(output_file, "w", newline="") as outfile:
+with (
+    open(input_file, "r", newline="") as infile,
+    open(output_file, "w", newline="") as outfile
+):
 ```
 
-A second `with` statement, this time opening **two** files at once,
-separated by a comma: the input CSV for reading (as `infile`) and the
-computed output path for writing (as `outfile`). Both stay open for the
-whole indented block below (lines 89–101) and are both automatically
-closed together when that block ends.
+A second `with` statement, this time opening **two** files at once. Since
+Python 3.10, wrapping multiple `with` items in parentheses like this lets
+you list each `open(...) as ...` on its own line, separated by commas —
+the parenthesized form of the same thing you could also write on one
+line as `with open(a) as x, open(b) as y:`. Here, the input CSV is opened
+for reading (as `infile`) and the computed output path for writing (as
+`outfile`). Both stay open for the whole indented block below (lines
+91–113) and are both automatically closed together when that block ends,
+in either order of success or failure.
 
-The trailing `\` on line 86 is a **line continuation** — it just tells
-Python "this statement keeps going on the next line," purely so the line
-isn't too long to read comfortably. It has no other effect.
+(An older, also-common style writes this same two-file `with` using a
+trailing `\` line continuation instead of parentheses:
+`with open(a) as x, \`, then `     open(b) as y:` on the next line. Both
+forms do exactly the same thing — this project uses the parenthesized
+form.)
 
-### Line 89 — write the copied header lines to the output
+### Line 92 — write the copied header lines to the output
 
 ```python
 outfile.writelines(header_lines)
@@ -196,7 +242,7 @@ insert its own newlines — that's why line 69 needed to keep each line's
 original trailing `\n` from the file). This writes the 11 header lines
 captured earlier straight into the output file, unchanged.
 
-### Lines 91–92 — set up CSV reading and writing
+### Lines 94–95 — set up CSV reading and writing
 
 ```python
 reader = csv.DictReader(infile)
@@ -213,7 +259,7 @@ writer = csv.writer(outfile)
   a plain Python list and have it correctly formatted as one CSV row
   (handling commas, quoting, etc.) and written out.
 
-### Lines 94–101 — build and write one output row per input row
+### Lines 98–113 — build and write one output row per input row
 
 ```python
 for row in reader:
@@ -225,6 +271,9 @@ for row in reader:
     data_row.append("")  # trailing empty field, matching the template
     writer.writerow(data_row)
 ```
+
+(Shown here with its explanatory comments stripped out — the actual code
+has one before each step, at lines 99, 102–103, 106, and 112.)
 
 - `for row in reader:` — iterates over the input CSV one row at a time;
   each `row` is a dictionary as described above.
@@ -250,11 +299,11 @@ for row in reader:
   output file.
 
 This loop body runs once per row of the input CSV, so it produces exactly
-one output row per input row. After the loop, line 103 (`return
+one output row per input row. After the loop, line 115 (`return
 output_file`) hands back the path that was written, so callers (like
-`main()`, below) can report it.
+`main()`, in `program.py`) can report it.
 
-## `CHANNEL_FOLDER_TO_OUTPUT_NAME` — the batch's mapping
+## `CHANNEL_FOLDER_TO_OUTPUT_NAME` — the batch's mapping (in `program.py`)
 
 ```python
 CHANNEL_FOLDER_TO_OUTPUT_NAME = {
@@ -266,14 +315,16 @@ CHANNEL_FOLDER_TO_OUTPUT_NAME = {
 ```
 
 A plain dictionary, defined at module level (not inside any function) so
-both `find_channel_folder()` and `main()` can see it. Each key is a
-channel folder's name *suffix* (see below for why not the whole name);
+`main()`, defined further down in the same file, can see it. Each key is
+a channel folder's name *suffix* (see below for why not the whole name);
 each value is the output file name that channel should produce. Being a
 `dict` also fixes an order — Python dictionaries remember insertion
 order — which is what lets `main()`'s loop process channels in this same
-order every run.
+order every run. (`find_channel_folder()`, imported from
+`utils/folder_lookup.py`, doesn't reference this dictionary directly —
+`main()` just passes it one suffix at a time, as an argument.)
 
-## `find_channel_folder()` — locating a folder without knowing its exact name
+## `find_channel_folder()` — locating a folder without knowing its exact name (in `utils/folder_lookup.py`)
 
 ```python
 def find_channel_folder(root_dir, folder_suffix):
@@ -313,7 +364,7 @@ that prefix looks like for all 12 folders, this searches for it:
 - If exactly one match was found, `matches[0]` — the only element of a
   one-item list — is returned as that channel's folder.
 
-## `main()` — running the batch
+## `main()` — running the batch (in `program.py`)
 
 ```python
 def main():
