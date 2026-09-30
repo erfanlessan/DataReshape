@@ -6,6 +6,8 @@ Created on Mon Sep 28 12:54:44 2026
 """
 
 import csv
+import glob
+import io
 import os
 
 # Falls back to the current working directory if __file__ isn't defined
@@ -72,6 +74,15 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
     if not output_filename.lower().endswith(".csv"):
         output_filename += ".csv"
 
+    # Header row 1 is `"File name","<name>","<version>"` in the template
+    # (e.g. "GAVIML00.CSV"). Replace cell B1 with the name being given to
+    # this output file.
+    first_row = next(csv.reader([header_lines[0]]))
+    first_row[1] = output_filename
+    buf = io.StringIO()
+    csv.writer(buf, lineterminator="\n", quoting=csv.QUOTE_ALL).writerow(first_row)
+    header_lines[0] = buf.getvalue()
+
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, output_filename)
 
@@ -107,10 +118,62 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
     return output_file
 
 
+# Each RawData channel folder (identified by its name's suffix, since the
+# numeric prefix in front of it, e.g. "01_", isn't assumed to be fixed or
+# known) -> the output file name it should produce.
+CHANNEL_FOLDER_TO_OUTPUT_NAME = {
+    "UU_IGBT": "GAVIML00",
+    "UL_IGBT": "GAVIML01",
+    "VU_IGBT": "GAVIML02",
+    "VL_IGBT": "GAVIML03",
+    "WU_IGBT": "GAVIML04",
+    "WL_IGBT": "GAVIML05",
+    "UU_FRD": "GAVIML06",
+    "UL_FRD": "GAVIML07",
+    "VU_FRD": "GAVIML08",
+    "VL_FRD": "GAVIML09",
+    "WU_FRD": "GAVIML10",
+    "WL_FRD": "GAVIML11",
+}
+
+
+def find_channel_folder(root_dir, folder_suffix):
+    """Find the one subfolder of root_dir whose name ends with
+    folder_suffix (e.g. "UU_IGBT" matches "01_UU_IGBT"), regardless of
+    whatever prefix comes before it. Raises FileNotFoundError if there
+    isn't exactly one match."""
+    matches = [
+        path for path in glob.glob(os.path.join(root_dir, f"*{folder_suffix}"))
+        if os.path.isdir(path)
+    ]
+    if len(matches) != 1:
+        raise FileNotFoundError(
+            f"Expected exactly one folder ending in '{folder_suffix}' inside "
+            f"{root_dir!r}, found {len(matches)}: {matches}"
+        )
+    return matches[0]
+
+
 def main():
-    """Prompt for the four pieces of information needed to reshape one
-    file, then do it. Works the same whether run from a terminal or from
+    """Ask once for the root folder containing all the channel
+    subfolders, then reshape every channel's file in one go, using
+    CHANNEL_FOLDER_TO_OUTPUT_NAME to find each input folder and name its
+    output file. Works the same whether run from a terminal or from
     Spyder's console (both support input())."""
+    output_dir = r"C:\00_Workspaces\1_lithium\2_lithium_frame_1\8_data\ProcessedData1"
+    input_filename = "lr8400-all-channels.csv"
+
+    input_root = input("Root directory containing the channel folders (e.g. .../RawData): ").strip()
+
+    for folder_suffix, output_name in CHANNEL_FOLDER_TO_OUTPUT_NAME.items():
+        try:
+            input_dir = find_channel_folder(input_root, folder_suffix)
+            input_file = os.path.join(input_dir, input_filename)
+            output_file = reshape_csv(input_file, output_dir, output_name)
+        except (FileNotFoundError, KeyError) as e:
+            print(f"[{folder_suffix}] SKIPPED: {e}")
+            continue
+        print(f"[{folder_suffix}] Wrote reshaped data to {output_file}")
     # Name constant folders
     output_dir = r"C:\00_Workspaces\1_lithium\2_lithium_frame_1\8_data\ProcessedData1"
     input_filename = "lr8400-all-channels.csv"
