@@ -53,11 +53,14 @@ COLUMN_MAP = {
 
 # TimeFromTrigger_s runs negative before the trigger, hits 0 at the
 # trigger, then increments positively. Using it (rather than
-# TimeFromRecordStart_s) as the output Time column, and keeping only rows
-# within TIME_WINDOW_S of the trigger, gives every channel's output the
-# same time span relative to the trigger event.
+# TimeFromRecordStart_s) as the output Time column, and always taking
+# exactly OUTPUT_ROW_COUNT rows centered on the row closest to 0, gives
+# every channel's output the same length, aligned to the same trigger
+# event. OUTPUT_ROW_COUNT is even, so "centered" means as close as
+# possible: half the rows before the trigger row, half from the trigger
+# row onward.
 TIME_SOURCE_COLUMN = "TimeFromTrigger_s"
-TIME_WINDOW_S = (-600, 600)  # inclusive (seconds before trigger, seconds after)
+OUTPUT_ROW_COUNT = 11992
 
 # The template's ALM-*, ALM-SOURCE-*, and Event columns have no equivalent
 # in the input data, so every output row gets the same placeholder values
@@ -91,13 +94,25 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, output_filename)
 
-    # Read the input data and keep only the rows within TIME_WINDOW_S of
-    # the trigger, so every channel's output covers the same time span.
-    # float_precision="round_trip" avoids pandas's default (faster but
-    # occasionally 1-bit-off) float parser subtly changing values.
-    data = pd.read_csv(input_file, float_precision="round_trip")
-    time_min, time_max = TIME_WINDOW_S
-    data = data[data[TIME_SOURCE_COLUMN].between(time_min, time_max)]
+    # Read the input data. float_precision="round_trip" avoids pandas's
+    # default (faster but occasionally 1-bit-off) float parser subtly
+    # changing values.
+    data = pd.read_csv(input_file, float_precision="round_trip").reset_index(drop=True)
+
+    # Take exactly OUTPUT_ROW_COUNT rows, centered on the row whose
+    # TimeFromTrigger_s is closest to 0 (the trigger).
+    center = data[TIME_SOURCE_COLUMN].abs().idxmin()
+    rows_before = OUTPUT_ROW_COUNT // 2
+    start = center - rows_before
+    end = start + OUTPUT_ROW_COUNT
+    if start < 0 or end > len(data):
+        raise ValueError(
+            f"{input_file!r} doesn't have enough rows around the trigger to "
+            f"produce {OUTPUT_ROW_COUNT} rows: needs {rows_before} rows before "
+            f"the trigger and {OUTPUT_ROW_COUNT - rows_before} at/after it, but "
+            f"only has {center} before and {len(data) - center} at/after."
+        )
+    data = data.iloc[start:end]
 
     # Build the output columns, in the exact order the target format
     # expects: Time, then every mapped channel (renamed/reordered per

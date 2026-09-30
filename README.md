@@ -2,7 +2,7 @@
 
 Converts a raw data-logger CSV (like `original_csv.csv`) into the layout
 used by `target_format.CSV` (a Graphtec-style instrument format), using
-`pandas` for the column remapping and time-window filtering.
+`pandas` for the column remapping and trigger-centered row selection.
 `utils/reshape.py`'s `reshape_csv()` handles one file at a time;
 `program.py`'s `main()` batches this over a fixed set of per-channel
 subfolders (IGBT/FRD × UU/UL/VU/VL/WU/WL) under a single root directory
@@ -15,8 +15,8 @@ pip install -r requirements.txt
 ```
 
 Everything else used is Python's standard library; `pandas` is the one
-extra dependency (used for reading each CSV, filtering it to the trigger
-time window, and building/writing the output columns).
+extra dependency (used for reading each CSV, selecting the rows centered
+on the trigger, and building/writing the output columns).
 
 ## Project layout
 
@@ -49,17 +49,23 @@ in `utils/`.
    output file, instead of the template's own file name
    (`GAVIML00.CSV`).
 
-2. **Builds the `Time` column from `TimeFromTrigger_s`, and keeps only
-   ±600 seconds around the trigger.** `TimeFromTrigger_s` runs negative
-   before the trigger event, hits `0` at the trigger, then counts up
-   afterward. Filtering every channel to the same window
-   (`TIME_WINDOW_S = (-600, 600)` in `utils/reshape.py`) around that
-   shared reference point is what makes all 12 output files line up in
-   time and, so long as each channel's raw recording actually covers the
-   full window, come out the same length. `main()` checks this after
-   running the whole batch and prints a warning naming any channel whose
-   row count doesn't match the rest — for example, if its raw recording
-   started or ended inside the window instead of outside it.
+2. **Builds the `Time` column from `TimeFromTrigger_s`, and keeps exactly
+   `OUTPUT_ROW_COUNT` (11992) rows centered on the trigger.**
+   `TimeFromTrigger_s` runs negative before the trigger event, hits `0` at
+   the trigger, then counts up afterward. Every output file takes exactly
+   `OUTPUT_ROW_COUNT` rows (set in `utils/reshape.py`) around the row
+   closest to `0`: half before it, half from it onward (since
+   `OUTPUT_ROW_COUNT` is even, `0` itself can't be the exact middle
+   element of the array, so it's placed as close to center as possible —
+   in practice one row off, e.g. 5996 rows before vs. 5996 at/after, which
+   includes the `0` row itself). This is what makes every channel's output
+   line up in time around the same event *and* always come out exactly the
+   same length, rather than depending on how much each channel's raw
+   recording happens to cover. If a channel's raw file doesn't have enough
+   rows on both sides of its trigger to fill the full `OUTPUT_ROW_COUNT`,
+   `reshape_csv()` raises an error for that channel (naming how many rows
+   it needed vs. had) instead of silently producing a shorter file; `main()`
+   catches this and skips just that channel.
 
 3. **Maps each named data column to its source column**, based on
    `data_reshape.md`:
@@ -149,8 +155,9 @@ of `program.py`, above `main()`), and for each channel:
    `GAVIML00.csv`, `GAVIML01.csv`, ...).
 
 If a channel's folder can't be found (missing, or more than one folder
-matches that suffix), that channel is skipped with a printed message and
-the rest of the batch still runs.
+matches that suffix), or its raw file doesn't have enough rows around the
+trigger, that channel is skipped with a printed message and the rest of
+the batch still runs.
 
 To point this at a different machine's folder layout, edit the constants
 at the top of `main()`:
@@ -160,8 +167,9 @@ at the top of `main()`:
 - `CHANNEL_FOLDER_TO_OUTPUT_NAME` — which folder suffix produces which
   output file name.
 
-To change the time window itself, edit `TIME_SOURCE_COLUMN` and
-`TIME_WINDOW_S` near the top of `utils/reshape.py`.
+To change the trigger column or the output row count, edit
+`TIME_SOURCE_COLUMN` and `OUTPUT_ROW_COUNT` near the top of
+`utils/reshape.py`.
 
 ### Reshaping a single file instead
 
@@ -169,8 +177,8 @@ To change the time window itself, edit `TIME_SOURCE_COLUMN` and
 `utils/reshape.py`, is the underlying function `main()` calls per channel,
 and remains a plain function you can call yourself for one file at a
 time. It returns `(output_file, row_count)` — the path written, and how
-many data rows ended up in it (after the time-window filter). From a
-terminal or your own script:
+many data rows ended up in it (always `OUTPUT_ROW_COUNT`, or an exception
+is raised instead). From a terminal or your own script:
 
 ```python
 from utils.reshape import reshape_csv
