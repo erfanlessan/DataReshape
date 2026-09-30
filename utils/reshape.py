@@ -6,6 +6,8 @@ import csv
 import io
 import os
 
+import pandas as pd
+
 # Falls back to the current working directory if __file__ isn't defined
 # (e.g. when this file's code is run via exec() rather than as a script).
 if "__file__" in globals():
@@ -49,20 +51,26 @@ COLUMN_MAP = {
     "Dwl": "CH1_7",
 }
 
-TIME_SOURCE_COLUMN = "TimeFromRecordStart_s"
+# TimeFromTrigger_s runs negative before the trigger, hits 0 at the
+# trigger, then increments positively. Using it (rather than
+# TimeFromRecordStart_s) as the output Time column, and keeping only rows
+# within TIME_WINDOW_S of the trigger, gives every channel's output the
+# same time span relative to the trigger event.
+TIME_SOURCE_COLUMN = "TimeFromTrigger_s"
+TIME_WINDOW_S = (-600, 600)  # inclusive (seconds before trigger, seconds after)
 
 # The template's ALM-*, ALM-SOURCE-*, and Event columns have no equivalent
-# in the input data, so every data row gets the same placeholder values the
-# sample template uses.
-ALARM_PLACEHOLDER = ["0", "0", "0", "0"]
-ALARM_SOURCE_PLACEHOLDER = ["", "", "", ""]
-EVENT_PLACEHOLDER = "0"
+# in the input data, so every output row gets the same placeholder values
+# the sample template uses.
+ALM_COLUMNS = ["ALM-1", "ALM-2", "ALM-3", "ALM-4"]
+ALM_SOURCE_COLUMNS = ["ALM-SOURCE-1", "ALM-SOURCE-2", "ALM-SOURCE-3", "ALM-SOURCE-4"]
+EVENT_COLUMN = "Event"
 
 
 def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_TEMPLATE_FILE):
     """Reshape a single input CSV into the target format and write it to
-    output_dir/output_filename. Returns the path of the file that was
-    written."""
+    output_dir/output_filename. Returns (output_file, row_count): the path
+    of the file that was written, and how many data rows it contains."""
 
     # Create list onject 'header lines' storing template file header columns
     with open(template_file, "r", newline="") as f:
@@ -83,33 +91,30 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, output_filename)
 
-    # Open input and output csv files
-    with (
-        open(input_file, "r", newline="") as infile,
-        open(output_file, "w", newline="") as outfile
-    ):
-        # Write header_lines to outfile starting from top left of csv
+    # Read the input data and keep only the rows within TIME_WINDOW_S of
+    # the trigger, so every channel's output covers the same time span.
+    # float_precision="round_trip" avoids pandas's default (faster but
+    # occasionally 1-bit-off) float parser subtly changing values.
+    data = pd.read_csv(input_file, float_precision="round_trip")
+    time_min, time_max = TIME_WINDOW_S
+    data = data[data[TIME_SOURCE_COLUMN].between(time_min, time_max)]
+
+    # Build the output columns, in the exact order the target format
+    # expects: Time, then every mapped channel (renamed/reordered per
+    # COLUMN_MAP), then the ALM/Event placeholders and a trailing empty
+    # field.
+    output = pd.DataFrame({"Time": data[TIME_SOURCE_COLUMN]})
+    for target_col, source_col in COLUMN_MAP.items():
+        output[target_col] = data[source_col]
+    for column in ALM_COLUMNS:
+        output[column] = 0
+    for column in ALM_SOURCE_COLUMNS:
+        output[column] = ""
+    output[EVENT_COLUMN] = 0
+    output["_trailing"] = ""  # trailing empty field, matching the template
+
+    with open(output_file, "w", newline="") as outfile:
         outfile.writelines(header_lines)
+        output.to_csv(outfile, header=False, index=False, lineterminator="\n")
 
-        reader = csv.DictReader(infile)
-        writer = csv.writer(outfile)
-
-        # Iterate through all rows in reader, write each row into data_row list
-        for row in reader:
-            # Time column for row vector being constructed
-            data_row = [row[TIME_SOURCE_COLUMN]]
-
-            # Data columns (Vce, Tamb, Tc, Vtherm) for row vector being made
-            # Order data in the order specified by COLUMN_MAP.values()
-            data_row += [row[source_col] for source_col in COLUMN_MAP.values()]
-
-            # Alarm and event placeholders to match target format
-            data_row += ALARM_PLACEHOLDER
-            data_row += ALARM_SOURCE_PLACEHOLDER
-            data_row.append(EVENT_PLACEHOLDER)
-            data_row.append("")  # trailing empty field, matching the template
-
-            # For row iteration, write data_row list to target csv
-            writer.writerow(data_row)
-
-    return output_file
+    return output_file, len(output)

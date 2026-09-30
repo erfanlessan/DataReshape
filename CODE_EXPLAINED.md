@@ -4,13 +4,16 @@ This walks through the file-handling and data-writing code, explaining
 the Python concepts it uses.
 
 > **Note:** this originally described a single `main()` function that did
-> all the file handling itself, all in one file. The project has since
-> been split into three files:
+> all the file handling itself, all in one file, using only the standard
+> library (`csv`, `io`, `os`). The project has since been split into three
+> files, and `reshape_csv()` now uses the third-party `pandas` library for
+> reading, filtering, and writing the row data:
 >
 > - `utils/reshape.py` — `reshape_csv(input_file, output_dir,
 >   output_filename, template_file)` does the actual file reading/writing
 >   for one file (the part walked through first, below), plus the
->   constants it needs (`COLUMN_MAP`, `HEADER_LINE_COUNT`, etc.).
+>   constants it needs (`COLUMN_MAP`, `HEADER_LINE_COUNT`, `TIME_WINDOW_S`,
+>   etc.).
 > - `utils/folder_lookup.py` — `find_channel_folder()` locates one
 >   channel's input folder by name pattern.
 > - `program.py` — imports both of the above and just does the
@@ -18,12 +21,13 @@ the Python concepts it uses.
 >   `main()`, which asks for one root directory, then loops over that
 >   mapping, calling the other two functions once per channel.
 >
-> The core file-handling logic explained first below (the `with`
-> statement, `open()`, reading the header block, the `csv` module, the
-> per-row loop) is unchanged — only which file/function it lives in, and
-> where its arguments come from, has moved. A section further down,
-> ["How `program.py` finds the other two files"](#how-programpy-finds-the-other-two-files),
-> explains the `import` lines this split introduced.
+> The general Python concepts explained first below (the `with` statement,
+> `open()`) still apply — `reshape_csv()` still uses plain `open()` for the
+> template and the output file, just no longer for the input file (`pandas`
+> opens that itself). A section further down, ["How `program.py` finds the
+> other two
+> files"](#how-programpy-finds-the-other-two-files), explains the `import`
+> lines the file split introduced.
 
 ## The `open()` function
 
@@ -72,8 +76,13 @@ finally:
 to forget the `try`/`finally` and accidentally leave a file open if an
 error occurs).
 
-You can open more than one file in a single `with` by separating them with
-commas — that's what lines 87–90 below do.
+You can also open more than one file in a single `with` by separating them
+with commas (or, since Python 3.10, by wrapping them in parentheses) —
+`reshape_csv()` doesn't currently need to (it only ever has one file open
+via `open()` at a time; `pandas` manages the input file's opening and
+closing on its own), but you'll see this form if you look at an earlier
+version of this project, or other code that reads and writes a file at
+the same time.
 
 ## How `program.py` finds the other two files
 
@@ -106,7 +115,7 @@ from utils.reshape import reshape_csv
 
 ## Walking through `reshape_csv()` (in `utils/reshape.py`)
 
-### Line 68 — open the template, read-only
+### Line 76 — open the template, read-only
 
 ```python
 with open(template_file, "r", newline="") as f:
@@ -114,9 +123,9 @@ with open(template_file, "r", newline="") as f:
 
 Opens the template file (`target_format.CSV` by default) for reading and
 names the resulting file object `f`. It will be automatically closed once
-the indented block under this `with` ends (i.e. right after line 69).
+the indented block under this `with` ends (i.e. right after line 77).
 
-### Line 69 — read the first N lines
+### Line 77 — read the first N lines
 
 ```python
 header_lines = [next(f) for _ in range(HEADER_LINE_COUNT)]
@@ -141,7 +150,7 @@ list element, and leaves the file positioned right after them — though
 that no longer matters here, since the file is closed as soon as this
 `with` block ends.
 
-### Lines 71–72 — make sure the output name ends in `.csv`
+### Lines 79–80 — make sure the output name ends in `.csv`
 
 ```python
 if not output_filename.lower().endswith(".csv"):
@@ -152,7 +161,7 @@ Appends `.csv` to `output_filename` when it isn't already there
 (case-insensitively, via `.lower()`), so `"result"` and `"result.csv"`
 both end up as `"result.csv"`.
 
-### Lines 74–81 — put the output file's own name into cell B1
+### Lines 82–89 — put the output file's own name into cell B1
 
 ```python
 first_row = next(csv.reader([header_lines[0]]))
@@ -190,7 +199,7 @@ file:
   as a string — here, the one reconstructed line, complete with its
   trailing `\n` — which replaces the original `header_lines[0]`.
 
-### Lines 83–84 — build the output path
+### Lines 91–92 — build the output path
 
 ```python
 os.makedirs(output_dir, exist_ok=True)
@@ -205,103 +214,120 @@ output_file = os.path.join(output_dir, output_filename)
   name into one path, using the correct separator for the operating
   system (`/` on Linux/macOS, `\` on Windows).
 
-### Lines 87–90 — open the input and output files at once
+### Lines 98–100 — read the input CSV and filter it to the time window
 
 ```python
-with (
-    open(input_file, "r", newline="") as infile,
-    open(output_file, "w", newline="") as outfile
-):
+data = pd.read_csv(input_file, float_precision="round_trip")
+time_min, time_max = TIME_WINDOW_S
+data = data[data[TIME_SOURCE_COLUMN].between(time_min, time_max)]
 ```
 
-A second `with` statement, this time opening **two** files at once. Since
-Python 3.10, wrapping multiple `with` items in parentheses like this lets
-you list each `open(...) as ...` on its own line, separated by commas —
-the parenthesized form of the same thing you could also write on one
-line as `with open(a) as x, open(b) as y:`. Here, the input CSV is opened
-for reading (as `infile`) and the computed output path for writing (as
-`outfile`). Both stay open for the whole indented block below (lines
-91–113) and are both automatically closed together when that block ends,
-in either order of success or failure.
+- `pd.read_csv(input_file, ...)` reads the whole input CSV in one call and
+  returns a `DataFrame` — pandas's table type, essentially a dictionary of
+  columns (each one a `Series`, a 1-D labelled array) that all share the
+  same row index. Every column's values are automatically parsed to a
+  sensible type — here, the numeric columns become 64-bit floats
+  (`float64`). This is the direct pandas equivalent of what
+  `csv.DictReader` did row-by-row in the earlier version, except the
+  entire file becomes one object up front, rather than one dictionary per
+  row as you iterate.
+- `float_precision="round_trip"` tells pandas's CSV parser to use the same
+  (slower, but exact) decimal-to-binary conversion that Python's own
+  `float()` uses. Without it, pandas's default parser can occasionally
+  produce a `float64` that's 1 bit different from what `float()` would
+  give for the same text — usually invisible, but avoidable, so it's
+  asked for explicitly here.
+- `time_min, time_max = TIME_WINDOW_S` — unpacks the 2-element tuple
+  `TIME_WINDOW_S = (-600, 600)` into two separate names, for readability
+  in the next line.
+- `data[TIME_SOURCE_COLUMN]` selects one column (here, `"TimeFromTrigger_s"`)
+  out of the DataFrame as a `Series`. `.between(time_min, time_max)`
+  is a pandas `Series` method that compares every value in that column
+  against the two bounds (inclusive) and returns a same-length `Series` of
+  `True`/`False`.
+- `data[<that True/False Series>]` — indexing a DataFrame with a
+  same-length boolean `Series` is pandas's way of **filtering rows**: it
+  keeps only the rows where the corresponding value is `True`, in this
+  case every row whose `TimeFromTrigger_s` falls within `TIME_WINDOW_S`.
+  Reassigning the result back to `data` replaces it with just those rows.
 
-(An older, also-common style writes this same two-file `with` using a
-trailing `\` line continuation instead of parentheses:
-`with open(a) as x, \`, then `     open(b) as y:` on the next line. Both
-forms do exactly the same thing — this project uses the parenthesized
-form.)
-
-### Line 92 — write the copied header lines to the output
+### Lines 102–114 — build the output columns
 
 ```python
-outfile.writelines(header_lines)
+output = pd.DataFrame({"Time": data[TIME_SOURCE_COLUMN]})
+for target_col, source_col in COLUMN_MAP.items():
+    output[target_col] = data[source_col]
+for column in ALM_COLUMNS:
+    output[column] = 0
+for column in ALM_SOURCE_COLUMNS:
+    output[column] = ""
+output[EVENT_COLUMN] = 0
+output["_trailing"] = ""  # trailing empty field, matching the template
 ```
 
-`writelines()` writes a list of strings to a file, one after another,
-without adding anything extra between them (unlike `print`, it does *not*
-insert its own newlines — that's why line 69 needed to keep each line's
-original trailing `\n` from the file). This writes the 11 header lines
-captured earlier straight into the output file, unchanged.
+- `pd.DataFrame({"Time": data[TIME_SOURCE_COLUMN]})` creates a brand-new,
+  empty-except-for-one-column DataFrame called `output`, whose first (and
+  so far only) column, `"Time"`, holds the filtered `TimeFromTrigger_s`
+  values. Building a fresh DataFrame (rather than modifying `data` in
+  place) keeps `output`'s columns in exactly the order they're added,
+  which matters here because that order becomes the output file's column
+  order.
+- `for target_col, source_col in COLUMN_MAP.items(): output[target_col] =
+  data[source_col]` — the same `.items()` loop pattern used elsewhere
+  (see `main()`, below), but here each iteration **adds a new column** to
+  `output`, named `target_col` (e.g. `"UU"`), containing the values of
+  `data`'s `source_col` column (e.g. `"CH2_1_UU_V"`). This single loop is
+  what does the renaming-and-reordering that the old code built up one
+  list element at a time.
+- The next two `for` loops add the four `ALM-*` columns (each filled with
+  the single value `0`) and the four `ALM-SOURCE-*` columns (each filled
+  with `""`). Assigning a single value like `output[column] = 0` to a
+  DataFrame column fills every row with that same value — pandas calls
+  this **broadcasting**.
+- `output[EVENT_COLUMN] = 0` adds the `"Event"` column the same way.
+- `output["_trailing"] = ""` adds one more, unnamed-in-the-output column,
+  purely so the written row ends with an extra empty field — the same
+  trailing comma the earlier, non-pandas version added with
+  `data_row.append("")`. Its Python name (`"_trailing"`) never appears in
+  the output, since the file is written without a header row (see below).
 
-### Lines 94–95 — set up CSV reading and writing
+### Lines 116–118 — write the header lines, then the data
 
 ```python
-reader = csv.DictReader(infile)
-writer = csv.writer(outfile)
+with open(output_file, "w", newline="") as outfile:
+    outfile.writelines(header_lines)
+    output.to_csv(outfile, header=False, index=False, lineterminator="\n")
 ```
 
-- `csv.DictReader(infile)` wraps the already-open `infile` so that each
-  row it produces is a **dictionary** keyed by column name (taken from the
-  input file's first line), e.g.
-  `{"CH1_1": "25.5", "CH1_2": "25.41", ...}`. That's what lets the rest of
-  the code look up columns by name (`row["CH1_1"]`) instead of by
-  position.
-- `csv.writer(outfile)` wraps the already-open `outfile` so you can hand it
-  a plain Python list and have it correctly formatted as one CSV row
-  (handling commas, quoting, etc.) and written out.
+- `with open(output_file, "w", newline="") as outfile:` opens just the
+  output file (unlike the input file, which `pandas` opened and closed on
+  its own inside `pd.read_csv()`).
+- `outfile.writelines(header_lines)` writes the 11 template header lines
+  first, exactly as before.
+- `output.to_csv(outfile, ...)` then writes the DataFrame itself,
+  appending to the same already-open file handle rather than creating a
+  new file (pandas accepts an open file object here just as readily as a
+  path). Three arguments matter:
+  - `header=False` — don't write `output`'s own column names
+    (`"Time"`, `"UU"`, ...) as a header row; the template's own header
+    rows, just written above, already serve that purpose.
+  - `index=False` — don't write pandas's row index (0, 1, 2, ...) as an
+    extra leading column; only the data columns are wanted.
+  - `lineterminator="\n"` — matches the plain `\n` line endings used
+    elsewhere in this file, rather than pandas's platform default.
 
-### Lines 98–113 — build and write one output row per input row
+### Line 120 — return the output path and row count
 
 ```python
-for row in reader:
-    data_row = [row[TIME_SOURCE_COLUMN]]
-    data_row += [row[source_col] for source_col in COLUMN_MAP.values()]
-    data_row += ALARM_PLACEHOLDER
-    data_row += ALARM_SOURCE_PLACEHOLDER
-    data_row.append(EVENT_PLACEHOLDER)
-    data_row.append("")  # trailing empty field, matching the template
-    writer.writerow(data_row)
+return output_file, len(output)
 ```
 
-(Shown here with its explanatory comments stripped out — the actual code
-has one before each step, at lines 99, 102–103, 106, and 112.)
-
-- `for row in reader:` — iterates over the input CSV one row at a time;
-  each `row` is a dictionary as described above.
-- `data_row = [row[TIME_SOURCE_COLUMN]]` — starts a new list for this
-  output row, with the Time value first (`TIME_SOURCE_COLUMN` is
-  `"TimeFromRecordStart_s"`).
-- `data_row += [row[source_col] for source_col in COLUMN_MAP.values()]` —
-  another list comprehension: for each source column name in
-  `COLUMN_MAP` (in the fixed order the dictionary was written in), look up
-  that value in the current row, and append all of them to `data_row` in
-  one go. `+=` on a list means "extend this list with the following
-  items," not "add" in the arithmetic sense.
-- The next three lines (`+= ALARM_PLACEHOLDER`, `+= ALARM_SOURCE_PLACEHOLDER`,
-  `.append(EVENT_PLACEHOLDER)`) tack on the fixed placeholder values for
-  the columns that have no source data (`ALM-*`, `ALM-SOURCE-*`, `Event`).
-  `+=` extends the list with multiple items; `.append()` adds a single
-  item.
-- `data_row.append("")` adds one more empty value at the very end, so the
-  written row ends with a trailing comma — matching the trailing comma
-  seen in every data row of `target_format.CSV`.
-- `writer.writerow(data_row)` finally converts `data_row` (a plain list of
-  strings) into one correctly-formatted CSV line and writes it to the
-  output file.
-
-This loop body runs once per row of the input CSV, so it produces exactly
-one output row per input row. After the loop, line 115 (`return
-output_file`) hands back the path that was written, so callers (like
-`main()`, in `program.py`) can report it.
+Returns two values at once, as a **tuple** — Python doesn't need any
+special syntax for this; separating two expressions with a comma after
+`return` is enough. `len(output)` on a DataFrame gives its number of
+rows, i.e. how many data rows actually fell inside `TIME_WINDOW_S` for
+this particular input file. `main()` (below) uses this to check that
+every channel produced the same number of rows.
 
 ## `CHANNEL_FOLDER_TO_OUTPUT_NAME` — the batch's mapping (in `program.py`)
 
@@ -373,15 +399,22 @@ def main():
 
     input_root = input("Root directory containing the channel folders (e.g. .../RawData): ").strip()
 
+    row_counts = {}
     for folder_suffix, output_name in CHANNEL_FOLDER_TO_OUTPUT_NAME.items():
         try:
             input_dir = find_channel_folder(input_root, folder_suffix)
             input_file = os.path.join(input_dir, input_filename)
-            output_file = reshape_csv(input_file, output_dir, output_name)
+            output_file, row_count = reshape_csv(input_file, output_dir, output_name)
         except (FileNotFoundError, KeyError) as e:
             print(f"[{folder_suffix}] SKIPPED: {e}")
             continue
-        print(f"[{folder_suffix}] Wrote reshaped data to {output_file}")
+        row_counts[folder_suffix] = row_count
+        print(f"[{folder_suffix}] Wrote {row_count} rows to {output_file}")
+
+    if row_counts and len(set(row_counts.values())) > 1:
+        print("WARNING: channels do not all have the same number of rows:")
+        for folder_suffix, row_count in row_counts.items():
+            print(f"  {folder_suffix}: {row_count} rows")
 ```
 
 - `output_dir` and `input_filename` are fixed for every channel in this
@@ -390,6 +423,9 @@ def main():
   than asked for.
 - `input()` is still used, but now only once, for the one thing that
   varies per run: which root directory to search under.
+- `row_counts = {}` starts an empty dictionary that will collect
+  `{folder_suffix: row_count}` for every channel that succeeds, so the
+  counts can be compared once the whole loop is done.
 - `for folder_suffix, output_name in CHANNEL_FOLDER_TO_OUTPUT_NAME.items():`
   — `.items()` on a dictionary gives you `(key, value)` pairs one at a
   time; unpacking each pair into two loop variables (`folder_suffix`,
@@ -397,6 +433,10 @@ def main():
   keys and values together. This runs the loop body once per entry in
   `CHANNEL_FOLDER_TO_OUTPUT_NAME`, in the order the dictionary was
   written.
+- `output_file, row_count = reshape_csv(...)` — unpacks the 2-item tuple
+  `reshape_csv()` now returns (see its last line, above) into two separate
+  names in one step, the same way `folder_suffix, output_name` was
+  unpacked from `.items()` just above.
 - `try` / `except (FileNotFoundError, KeyError) as e:` — this is Python's
   error-handling construct: code that might raise an exception goes under
   `try`; if it does, execution jumps to the matching `except` block
@@ -404,16 +444,27 @@ def main():
   parentheses means "catch either of these." Here, `find_channel_folder()`
   can raise `FileNotFoundError` (see above), and `reshape_csv()` can raise
   `KeyError` if the input file it finds doesn't actually contain a column
-  the mapping expects (e.g. the wrong CSV, or a differently-named
-  channel). `as e` captures whichever exception object was raised, under
-  the name `e`, so its message can be used afterward.
+  the mapping (or `TIME_SOURCE_COLUMN`) expects (e.g. the wrong CSV, or a
+  differently-named channel). `as e` captures whichever exception object
+  was raised, under the name `e`, so its message can be used afterward.
 - `print(...)` then `continue` — when a channel fails, its error is
   printed with which channel it was, and `continue` skips the rest of
   *this* loop iteration, jumping straight to the next channel rather than
   stopping the whole batch. Twelve folders means one bad one shouldn't
-  block reshaping the other eleven.
-- When nothing raises, the `try` block runs to completion and the final
-  `print` (outside the `try`) reports success for that channel instead.
+  block reshaping the other eleven. Note that a channel that hits this
+  `continue` is never added to `row_counts` at all.
+- When nothing raises, `row_counts[folder_suffix] = row_count` records
+  that channel's count, and the final `print` (outside the `try`) reports
+  success for that channel instead.
+- After the loop, `set(row_counts.values())` collects the distinct row
+  counts seen across every channel that succeeded — a `set` automatically
+  drops duplicates, so if every channel produced the same count, this set
+  has exactly one element. `len(...) > 1` checks for more than one
+  distinct count, i.e. at least one channel disagrees with the others; the
+  `row_counts and` before it just guards against running this check (and
+  printing a confusing warning) when the batch found zero successful
+  channels at all. If the counts do disagree, every channel's count is
+  printed so it's clear which one(s) are off.
 
 ### The script entry point
 
