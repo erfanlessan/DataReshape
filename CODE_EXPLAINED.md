@@ -298,10 +298,11 @@ positioned so the trigger (`TimeFromTrigger_s == 0`) sits in the middle:
   `end`" — explicit). This replaces `data` with just that slice: exactly
   `OUTPUT_ROW_COUNT` rows.
 
-### Lines 117–129 — build the output columns
+### Lines 125–134 — build the output columns
 
 ```python
-output = pd.DataFrame({"Time": data[TIME_SOURCE_COLUMN]})
+time_values = data[TIME_SOURCE_COLUMN]
+output = pd.DataFrame({"Time": time_values - time_values.iloc[0]})
 for target_col, source_col in COLUMN_MAP.items():
     output[target_col] = data[source_col]
 for column in ALM_COLUMNS:
@@ -312,13 +313,29 @@ output[EVENT_COLUMN] = 0
 output["_trailing"] = ""  # trailing empty field, matching the template
 ```
 
-- `pd.DataFrame({"Time": data[TIME_SOURCE_COLUMN]})` creates a brand-new,
-  empty-except-for-one-column DataFrame called `output`, whose first (and
-  so far only) column, `"Time"`, holds the selected `TimeFromTrigger_s`
-  values. Building a fresh DataFrame (rather than modifying `data` in
-  place) keeps `output`'s columns in exactly the order they're added,
-  which matters here because that order becomes the output file's column
-  order.
+- `time_values = data[TIME_SOURCE_COLUMN]` — just gives the already-sliced
+  `TimeFromTrigger_s` column (still running from a negative value, through
+  `0` at the trigger, to a positive value) a shorter name to reuse on the
+  next line.
+- `time_values - time_values.iloc[0]` — subtracts a single number (the
+  *first* selected row's own time value — `.iloc[0]` is "position 0",
+  same idea as the `.iloc[start:end]` slice above, but picking out one
+  row instead of a range) from *every* value in the `Series`. Pandas
+  applies a `Series`-minus-single-number operation element-wise, so this
+  produces a new `Series` the same length as `time_values`, shifted so
+  its first entry becomes `0.0` and every later entry becomes "seconds
+  since that first row" instead of "seconds since the trigger." This is
+  what re-bases the output's `Time` column to start at `0` instead of
+  wherever `TimeFromTrigger_s` happened to start (a negative number, since
+  the window begins before the trigger). It doesn't affect which rows got
+  selected — that decision (lines 102–115, above) already happened, using
+  `TIME_SOURCE_COLUMN`'s original, un-shifted values.
+- `pd.DataFrame({"Time": ...})` creates a brand-new, empty-except-for-one-
+  column DataFrame called `output`, whose first (and so far only) column,
+  `"Time"`, holds those re-based values. Building a fresh DataFrame
+  (rather than modifying `data` in place) keeps `output`'s columns in
+  exactly the order they're added, which matters here because that order
+  becomes the output file's column order.
 - `for target_col, source_col in COLUMN_MAP.items(): output[target_col] =
   data[source_col]` — the same `.items()` loop pattern used elsewhere
   (see `main()`, below), but here each iteration **adds a new column** to
@@ -338,7 +355,7 @@ output["_trailing"] = ""  # trailing empty field, matching the template
   `data_row.append("")`. Its Python name (`"_trailing"`) never appears in
   the output, since the file is written without a header row (see below).
 
-### Lines 131–133 — write the header lines, then the data
+### Lines 136–138 — write the header lines, then the data
 
 ```python
 with open(output_file, "w", newline="") as outfile:
@@ -363,7 +380,7 @@ with open(output_file, "w", newline="") as outfile:
   - `lineterminator="\n"` — matches the plain `\n` line endings used
     elsewhere in this file, rather than pandas's platform default.
 
-### Line 135 — return the output path and row count
+### Line 140 — return the output path and row count
 
 ```python
 return output_file, len(output)

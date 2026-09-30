@@ -67,6 +67,15 @@ in `utils/`.
    it needed vs. had) instead of silently producing a shorter file; `main()`
    catches this and skips just that channel.
 
+   Row *selection* uses `TimeFromTrigger_s`'s original values (so the
+   window is still centered on the actual trigger), but the output
+   `Time` column itself is then re-based to start at `0` — every value has
+   the first selected row's time subtracted from it — rather than
+   starting from `TimeFromTrigger_s`'s own negative starting value. So the
+   output `Time` column runs `0, 0.1, 0.2, ..., 1199.1` (seconds since the
+   start of the selected window), not `-599.6, -599.5, ..., 599.5`
+   (seconds since the trigger).
+
 3. **Maps each named data column to its source column**, based on
    `data_reshape.md`:
 
