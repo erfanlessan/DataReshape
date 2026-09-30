@@ -66,6 +66,8 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
     """Reshape a single input CSV into the target format and write it to
     output_dir/output_filename. Returns the path of the file that was
     written."""
+
+    # Create list onject 'header lines' storing template file header columns
     with open(template_file, "r", newline="") as f:
         header_lines = [next(f) for _ in range(HEADER_LINE_COUNT)]
 
@@ -84,21 +86,33 @@ def reshape_csv(input_file, output_dir, output_filename, template_file=DEFAULT_T
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, output_filename)
 
-    with open(input_file, "r", newline="") as infile, \
-         open(output_file, "w", newline="") as outfile:
-
+    # Open input and output csv files
+    with (
+        open(input_file, "r", newline="") as infile,
+        open(output_file, "w", newline="") as outfile
+    ):
+        # Write header_lines to outfile starting from top left of csv
         outfile.writelines(header_lines)
 
         reader = csv.DictReader(infile)
         writer = csv.writer(outfile)
 
+        # Iterate through all rows in reader, write each row into data_row list
         for row in reader:
+            # Time column for row vector being constructed
             data_row = [row[TIME_SOURCE_COLUMN]]
+
+            # Data columns (Vce, Tamb, Tc, Vtherm) for row vector being made
+            # Order data in the order specified by COLUMN_MAP.values()
             data_row += [row[source_col] for source_col in COLUMN_MAP.values()]
+
+            # Alarm and event placeholders to match target format
             data_row += ALARM_PLACEHOLDER
             data_row += ALARM_SOURCE_PLACEHOLDER
             data_row.append(EVENT_PLACEHOLDER)
             data_row.append("")  # trailing empty field, matching the template
+
+            # For row iteration, write data_row list to target csv
             writer.writerow(data_row)
 
     return output_file
@@ -160,6 +174,19 @@ def main():
             print(f"[{folder_suffix}] SKIPPED: {e}")
             continue
         print(f"[{folder_suffix}] Wrote reshaped data to {output_file}")
+    # Name constant folders
+    output_dir = r"C:\00_Workspaces\1_lithium\2_lithium_frame_1\8_data\ProcessedData1"
+    input_filename = "lr8400-all-channels.csv"
+
+    input_dir = input("Directory containing the file to be reshaped: ").strip()
+    # output_dir = input("Destination directory for the output: ").strip()
+
+    output_filename = input("Name to give the output CSV file: ").strip()
+    # input_filename = input("Name of the file to be reshaped: ").strip()
+
+    input_file = os.path.join(input_dir, input_filename)
+    output_file = reshape_csv(input_file, output_dir, output_filename)
+    print(f"Wrote reshaped data to {output_file}")
 
 
 if __name__ == "__main__":
