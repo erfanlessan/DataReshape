@@ -40,15 +40,26 @@ def main():
 
     input_root = input("Root directory containing the channel folders (e.g. .../RawData): ").strip()
 
+    row_counts = {}
     for folder_suffix, output_name in CHANNEL_FOLDER_TO_OUTPUT_NAME.items():
         try:
             input_dir = find_channel_folder(input_root, folder_suffix)
             input_file = os.path.join(input_dir, input_filename)
-            output_file = reshape_csv(input_file, output_dir, output_name)
+            output_file, row_count = reshape_csv(input_file, output_dir, output_name)
         except (FileNotFoundError, KeyError) as e:
             print(f"[{folder_suffix}] SKIPPED: {e}")
             continue
-        print(f"[{folder_suffix}] Wrote reshaped data to {output_file}")
+        row_counts[folder_suffix] = row_count
+        print(f"[{folder_suffix}] Wrote {row_count} rows to {output_file}")
+
+    # All channels are filtered to the same TIME_WINDOW_S around the
+    # trigger, so they should all end up with the same row count. If not,
+    # at least one channel's raw recording doesn't fully cover that
+    # window, which is worth flagging rather than leaving unnoticed.
+    if row_counts and len(set(row_counts.values())) > 1:
+        print("WARNING: channels do not all have the same number of rows:")
+        for folder_suffix, row_count in row_counts.items():
+            print(f"  {folder_suffix}: {row_count} rows")
 
 
 if __name__ == "__main__":

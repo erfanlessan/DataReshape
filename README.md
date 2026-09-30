@@ -1,11 +1,22 @@
 # CSV Reshape Script
 
 Converts a raw data-logger CSV (like `original_csv.csv`) into the layout
-used by `target_format.CSV` (a Graphtec-style instrument format).
+used by `target_format.CSV` (a Graphtec-style instrument format), using
+`pandas` for the column remapping and time-window filtering.
 `utils/reshape.py`'s `reshape_csv()` handles one file at a time;
 `program.py`'s `main()` batches this over a fixed set of per-channel
 subfolders (IGBT/FRD × UU/UL/VU/VL/WU/WL) under a single root directory
 you're asked for once, writing one named output file per channel.
+
+## Requirements
+
+```bash
+pip install -r requirements.txt
+```
+
+Everything else used is Python's standard library; `pandas` is the one
+extra dependency (used for reading each CSV, filtering it to the trigger
+time window, and building/writing the output columns).
 
 ## Project layout
 
@@ -16,6 +27,7 @@ utils/
     folder_lookup.py     find_channel_folder(), the per-channel folder finder
 target_format.CSV      the instrument-format template (header rows + column layout)
 data_reshape.md         the original CH1_x/CH2_x -> named-column mapping spec
+requirements.txt        the pandas dependency
 ```
 
 `program.py` imports `reshape_csv` and `find_channel_folder` from `utils`
@@ -37,10 +49,17 @@ in `utils/`.
    output file, instead of the template's own file name
    (`GAVIML00.CSV`).
 
-2. **Builds the `Time` column from `TimeFromRecordStart_s`.** The target
-   format's `Time` column values (`0, 0.1, 0.2, ...`) match
-   `TimeFromRecordStart_s` in the original data exactly, so that's the
-   source column used.
+2. **Builds the `Time` column from `TimeFromTrigger_s`, and keeps only
+   ±600 seconds around the trigger.** `TimeFromTrigger_s` runs negative
+   before the trigger event, hits `0` at the trigger, then counts up
+   afterward. Filtering every channel to the same window
+   (`TIME_WINDOW_S = (-600, 600)` in `utils/reshape.py`) around that
+   shared reference point is what makes all 12 output files line up in
+   time and, so long as each channel's raw recording actually covers the
+   full window, come out the same length. `main()` checks this after
+   running the whole batch and prints a warning naming any channel whose
+   row count doesn't match the rest — for example, if its raw recording
+   started or ended inside the window instead of outside it.
 
 3. **Maps each named data column to its source column**, based on
    `data_reshape.md`:
@@ -80,20 +99,29 @@ in `utils/`.
    row uses the same placeholder values the sample template uses:
    `ALM-1..4 = 0`, `ALM-SOURCE-1..4 = ""` (empty), `Event = 0`.
 
-5. **Writes one output row per input row**, in the exact column order
-   required by the target format, followed by a trailing empty field
-   (matching the trailing comma seen in `target_format.CSV`).
+5. **Writes one output row per (filtered) input row**, in the exact
+   column order required by the target format, followed by a trailing
+   empty field (matching the trailing comma seen in `target_format.CSV`).
 
 ## Known simplifications
 
-- Numeric values are written as plain numbers/strings passed through from
-  the source CSV, not reformatted into the target sample's scientific
-  notation (e.g. `1.28500E+00`).
+- Numeric values are parsed by pandas into `float64` and rewritten in
+  pandas's own formatting, rather than the source CSV's original text
+  being passed through unchanged. `read_csv(..., float_precision=
+  "round_trip")` is used specifically so this doesn't silently change any
+  value's last bit (pandas's default float parser can be 1 ULP off from
+  Python's own `float()` for some decimal strings) — but a source value
+  with unusually many significant digits (e.g. `0.60309999999999997`) can
+  still come out with a different-length, numerically-identical
+  representation (`0.6031`), since that's the shortest string that reads
+  back to the same `float64` value.
+- Numbers aren't reformatted into the target sample's scientific notation
+  (e.g. `1.28500E+00`).
 - Empty `ALM-SOURCE-*` fields are written unquoted, whereas the sample
   target file quotes them (`""`).
 
-If the tool that consumes `reshaped_output.csv` requires exact formatting
-to match `target_format.CSV` (scientific notation, quoted empty strings),
+If the tool that consumes the output CSVs requires exact formatting to
+match `target_format.CSV` (scientific notation, quoted empty strings),
 the script will need to be updated to reproduce that formatting.
 
 ## Usage
@@ -132,17 +160,22 @@ at the top of `main()`:
 - `CHANNEL_FOLDER_TO_OUTPUT_NAME` — which folder suffix produces which
   output file name.
 
+To change the time window itself, edit `TIME_SOURCE_COLUMN` and
+`TIME_WINDOW_S` near the top of `utils/reshape.py`.
+
 ### Reshaping a single file instead
 
 `reshape_csv(input_file, output_dir, output_filename)`, in
 `utils/reshape.py`, is the underlying function `main()` calls per channel,
 and remains a plain function you can call yourself for one file at a
-time. From a terminal or your own script:
+time. It returns `(output_file, row_count)` — the path written, and how
+many data rows ended up in it (after the time-window filter). From a
+terminal or your own script:
 
 ```python
 from utils.reshape import reshape_csv
 
-reshape_csv("data/original_csv.csv", "output", "my_result.csv")
+output_file, row_count = reshape_csv("data/original_csv.csv", "output", "my_result.csv")
 ```
 
 Or interactively from Spyder's console, once `program.py` has been run
@@ -151,7 +184,7 @@ Or interactively from Spyder's console, once `program.py` has been run
 import:
 
 ```python
-reshape_csv("data/original_csv.csv", "output", "my_result.csv")
+output_file, row_count = reshape_csv("data/original_csv.csv", "output", "my_result.csv")
 ```
 
 ## Using it from Spyder
