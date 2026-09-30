@@ -12,8 +12,8 @@ the Python concepts it uses.
 > - `utils/reshape.py` — `reshape_csv(input_file, output_dir,
 >   output_filename, template_file)` does the actual file reading/writing
 >   for one file (the part walked through first, below), plus the
->   constants it needs (`COLUMN_MAP`, `HEADER_LINE_COUNT`, `TIME_WINDOW_S`,
->   etc.).
+>   constants it needs (`COLUMN_MAP`, `HEADER_LINE_COUNT`,
+>   `OUTPUT_ROW_COUNT`, etc.).
 > - `utils/folder_lookup.py` — `find_channel_folder()` locates one
 >   channel's input folder by name pattern.
 > - `program.py` — imports both of the above and just does the
@@ -115,7 +115,7 @@ from utils.reshape import reshape_csv
 
 ## Walking through `reshape_csv()` (in `utils/reshape.py`)
 
-### Line 76 — open the template, read-only
+### Line 79 — open the template, read-only
 
 ```python
 with open(template_file, "r", newline="") as f:
@@ -123,9 +123,9 @@ with open(template_file, "r", newline="") as f:
 
 Opens the template file (`target_format.CSV` by default) for reading and
 names the resulting file object `f`. It will be automatically closed once
-the indented block under this `with` ends (i.e. right after line 77).
+the indented block under this `with` ends (i.e. right after line 80).
 
-### Line 77 — read the first N lines
+### Line 80 — read the first N lines
 
 ```python
 header_lines = [next(f) for _ in range(HEADER_LINE_COUNT)]
@@ -150,7 +150,7 @@ list element, and leaves the file positioned right after them — though
 that no longer matters here, since the file is closed as soon as this
 `with` block ends.
 
-### Lines 79–80 — make sure the output name ends in `.csv`
+### Lines 82–83 — make sure the output name ends in `.csv`
 
 ```python
 if not output_filename.lower().endswith(".csv"):
@@ -161,7 +161,7 @@ Appends `.csv` to `output_filename` when it isn't already there
 (case-insensitively, via `.lower()`), so `"result"` and `"result.csv"`
 both end up as `"result.csv"`.
 
-### Lines 82–89 — put the output file's own name into cell B1
+### Lines 85–92 — put the output file's own name into cell B1
 
 ```python
 first_row = next(csv.reader([header_lines[0]]))
@@ -199,7 +199,7 @@ file:
   as a string — here, the one reconstructed line, complete with its
   trailing `\n` — which replaces the original `header_lines[0]`.
 
-### Lines 91–92 — build the output path
+### Lines 94–95 — build the output path
 
 ```python
 os.makedirs(output_dir, exist_ok=True)
@@ -214,12 +214,10 @@ output_file = os.path.join(output_dir, output_filename)
   name into one path, using the correct separator for the operating
   system (`/` on Linux/macOS, `\` on Windows).
 
-### Lines 98–100 — read the input CSV and filter it to the time window
+### Line 100 — read the input CSV
 
 ```python
-data = pd.read_csv(input_file, float_precision="round_trip")
-time_min, time_max = TIME_WINDOW_S
-data = data[data[TIME_SOURCE_COLUMN].between(time_min, time_max)]
+data = pd.read_csv(input_file, float_precision="round_trip").reset_index(drop=True)
 ```
 
 - `pd.read_csv(input_file, ...)` reads the whole input CSV in one call and
@@ -237,21 +235,70 @@ data = data[data[TIME_SOURCE_COLUMN].between(time_min, time_max)]
   produce a `float64` that's 1 bit different from what `float()` would
   give for the same text — usually invisible, but avoidable, so it's
   asked for explicitly here.
-- `time_min, time_max = TIME_WINDOW_S` — unpacks the 2-element tuple
-  `TIME_WINDOW_S = (-600, 600)` into two separate names, for readability
-  in the next line.
-- `data[TIME_SOURCE_COLUMN]` selects one column (here, `"TimeFromTrigger_s"`)
-  out of the DataFrame as a `Series`. `.between(time_min, time_max)`
-  is a pandas `Series` method that compares every value in that column
-  against the two bounds (inclusive) and returns a same-length `Series` of
-  `True`/`False`.
-- `data[<that True/False Series>]` — indexing a DataFrame with a
-  same-length boolean `Series` is pandas's way of **filtering rows**: it
-  keeps only the rows where the corresponding value is `True`, in this
-  case every row whose `TimeFromTrigger_s` falls within `TIME_WINDOW_S`.
-  Reassigning the result back to `data` replaces it with just those rows.
+- `.reset_index(drop=True)` — a freshly-read DataFrame's row index is
+  already `0, 1, 2, ...`, so this looks like a no-op here, but it's a
+  cheap guarantee that positions like `data.iloc[5996]` really do mean
+  "the 5997th row" (rather than whatever row happened to carry the label
+  `5996`), which the next block relies on. `drop=True` means "don't keep
+  the old index as a new column" — there wouldn't be anything meaningfully
+  different to keep anyway here, but it's the usual way to write a
+  pure reset.
 
-### Lines 102–114 — build the output columns
+### Lines 102–115 — select exactly `OUTPUT_ROW_COUNT` rows, centered on the trigger
+
+```python
+center = data[TIME_SOURCE_COLUMN].abs().idxmin()
+rows_before = OUTPUT_ROW_COUNT // 2
+start = center - rows_before
+end = start + OUTPUT_ROW_COUNT
+if start < 0 or end > len(data):
+    raise ValueError(
+        f"{input_file!r} doesn't have enough rows around the trigger to "
+        f"produce {OUTPUT_ROW_COUNT} rows: needs {rows_before} rows before "
+        f"the trigger and {OUTPUT_ROW_COUNT - rows_before} at/after it, but "
+        f"only has {center} before and {len(data) - center} at/after."
+    )
+data = data.iloc[start:end]
+```
+
+The goal is to always end up with exactly `OUTPUT_ROW_COUNT` (11992) rows,
+positioned so the trigger (`TimeFromTrigger_s == 0`) sits in the middle:
+
+- `data[TIME_SOURCE_COLUMN].abs()` takes the absolute value of every
+  entry in the `TimeFromTrigger_s` column (so `-0.1` and `0.1` both become
+  `0.1`), as a new `Series`. `.idxmin()` then returns the *label* (here,
+  since the index was just reset to `0, 1, 2, ...`, effectively the
+  position) of that `Series`' smallest value — i.e. the row whose
+  `TimeFromTrigger_s` is closest to `0`. That row becomes `center`.
+- `rows_before = OUTPUT_ROW_COUNT // 2` — integer division: `11992 // 2 =
+  5996`. Because `OUTPUT_ROW_COUNT` is even, there's no single row that
+  can be the exact middle of the final 11992-row array while also being
+  one specific row (the trigger row) — splitting the difference, this
+  puts `5996` rows before the trigger row and the trigger row plus `5995`
+  rows after it (`11992 - 5996 = 5996` rows *from* the trigger row
+  onward), which is as centered as an even-length slice including a
+  specific row can be.
+- `start = center - rows_before` and `end = start + OUTPUT_ROW_COUNT`
+  compute the row-position range to keep. Python's slicing convention
+  (the end position is *exclusive*) is why `end` is `start +
+  OUTPUT_ROW_COUNT` rather than `OUTPUT_ROW_COUNT - 1`.
+- `if start < 0 or end > len(data): raise ValueError(...)` — guards
+  against a file that doesn't actually have 5996 rows before its trigger,
+  or 5996 at/after it (e.g. a shorter recording). Rather than silently
+  returning fewer rows (which would break the "every channel gets the
+  same length" guarantee this whole calculation exists for), it raises an
+  exception with a message that includes exactly how many rows were
+  needed versus how many exist on each side — everything a caller (or a
+  person reading the error) needs to diagnose it. `main()` (below) catches
+  this and skips just that one channel.
+- `data.iloc[start:end]` — `.iloc` selects rows by integer *position*
+  (as opposed to `.loc`, which selects by index *label*; the two usually
+  coincide here since the index was reset, but `.iloc` makes the intent —
+  "the rows from position `start` up to, but not including, position
+  `end`" — explicit). This replaces `data` with just that slice: exactly
+  `OUTPUT_ROW_COUNT` rows.
+
+### Lines 117–129 — build the output columns
 
 ```python
 output = pd.DataFrame({"Time": data[TIME_SOURCE_COLUMN]})
@@ -267,7 +314,7 @@ output["_trailing"] = ""  # trailing empty field, matching the template
 
 - `pd.DataFrame({"Time": data[TIME_SOURCE_COLUMN]})` creates a brand-new,
   empty-except-for-one-column DataFrame called `output`, whose first (and
-  so far only) column, `"Time"`, holds the filtered `TimeFromTrigger_s`
+  so far only) column, `"Time"`, holds the selected `TimeFromTrigger_s`
   values. Building a fresh DataFrame (rather than modifying `data` in
   place) keeps `output`'s columns in exactly the order they're added,
   which matters here because that order becomes the output file's column
@@ -291,7 +338,7 @@ output["_trailing"] = ""  # trailing empty field, matching the template
   `data_row.append("")`. Its Python name (`"_trailing"`) never appears in
   the output, since the file is written without a header row (see below).
 
-### Lines 116–118 — write the header lines, then the data
+### Lines 131–133 — write the header lines, then the data
 
 ```python
 with open(output_file, "w", newline="") as outfile:
@@ -316,7 +363,7 @@ with open(output_file, "w", newline="") as outfile:
   - `lineterminator="\n"` — matches the plain `\n` line endings used
     elsewhere in this file, rather than pandas's platform default.
 
-### Line 120 — return the output path and row count
+### Line 135 — return the output path and row count
 
 ```python
 return output_file, len(output)
@@ -325,9 +372,9 @@ return output_file, len(output)
 Returns two values at once, as a **tuple** — Python doesn't need any
 special syntax for this; separating two expressions with a comma after
 `return` is enough. `len(output)` on a DataFrame gives its number of
-rows, i.e. how many data rows actually fell inside `TIME_WINDOW_S` for
-this particular input file. `main()` (below) uses this to check that
-every channel produced the same number of rows.
+rows — always `OUTPUT_ROW_COUNT` at this point, since the slice above
+either produces exactly that many rows or the function has already
+raised an exception — which `main()` (below) reports for each channel.
 
 ## `CHANNEL_FOLDER_TO_OUTPUT_NAME` — the batch's mapping (in `program.py`)
 
@@ -399,22 +446,15 @@ def main():
 
     input_root = input("Root directory containing the channel folders (e.g. .../RawData): ").strip()
 
-    row_counts = {}
     for folder_suffix, output_name in CHANNEL_FOLDER_TO_OUTPUT_NAME.items():
         try:
             input_dir = find_channel_folder(input_root, folder_suffix)
             input_file = os.path.join(input_dir, input_filename)
             output_file, row_count = reshape_csv(input_file, output_dir, output_name)
-        except (FileNotFoundError, KeyError) as e:
+        except (FileNotFoundError, KeyError, ValueError) as e:
             print(f"[{folder_suffix}] SKIPPED: {e}")
             continue
-        row_counts[folder_suffix] = row_count
         print(f"[{folder_suffix}] Wrote {row_count} rows to {output_file}")
-
-    if row_counts and len(set(row_counts.values())) > 1:
-        print("WARNING: channels do not all have the same number of rows:")
-        for folder_suffix, row_count in row_counts.items():
-            print(f"  {folder_suffix}: {row_count} rows")
 ```
 
 - `output_dir` and `input_filename` are fixed for every channel in this
@@ -423,9 +463,6 @@ def main():
   than asked for.
 - `input()` is still used, but now only once, for the one thing that
   varies per run: which root directory to search under.
-- `row_counts = {}` starts an empty dictionary that will collect
-  `{folder_suffix: row_count}` for every channel that succeeds, so the
-  counts can be compared once the whole loop is done.
 - `for folder_suffix, output_name in CHANNEL_FOLDER_TO_OUTPUT_NAME.items():`
   — `.items()` on a dictionary gives you `(key, value)` pairs one at a
   time; unpacking each pair into two loop variables (`folder_suffix`,
@@ -434,37 +471,32 @@ def main():
   `CHANNEL_FOLDER_TO_OUTPUT_NAME`, in the order the dictionary was
   written.
 - `output_file, row_count = reshape_csv(...)` — unpacks the 2-item tuple
-  `reshape_csv()` now returns (see its last line, above) into two separate
+  `reshape_csv()` returns (see its last line, above) into two separate
   names in one step, the same way `folder_suffix, output_name` was
   unpacked from `.items()` just above.
-- `try` / `except (FileNotFoundError, KeyError) as e:` — this is Python's
-  error-handling construct: code that might raise an exception goes under
-  `try`; if it does, execution jumps to the matching `except` block
-  instead of crashing the whole program. Listing two exception types in
-  parentheses means "catch either of these." Here, `find_channel_folder()`
-  can raise `FileNotFoundError` (see above), and `reshape_csv()` can raise
-  `KeyError` if the input file it finds doesn't actually contain a column
-  the mapping (or `TIME_SOURCE_COLUMN`) expects (e.g. the wrong CSV, or a
-  differently-named channel). `as e` captures whichever exception object
-  was raised, under the name `e`, so its message can be used afterward.
+- `try` / `except (FileNotFoundError, KeyError, ValueError) as e:` — this
+  is Python's error-handling construct: code that might raise an
+  exception goes under `try`; if it does, execution jumps to the matching
+  `except` block instead of crashing the whole program. Listing several
+  exception types in parentheses means "catch any of these." Here,
+  `find_channel_folder()` can raise `FileNotFoundError` (see above),
+  `reshape_csv()` can raise `KeyError` if the input file it finds doesn't
+  actually contain a column the mapping (or `TIME_SOURCE_COLUMN`) expects
+  (e.g. the wrong CSV, or a differently-named channel), and `reshape_csv()`
+  can also raise `ValueError` if that channel's file doesn't have enough
+  rows around its trigger to produce `OUTPUT_ROW_COUNT` rows (see its
+  `raise ValueError(...)`, above). `as e` captures whichever exception
+  object was raised, under the name `e`, so its message (already written
+  to explain exactly what went wrong, in each `raise`) can be printed.
 - `print(...)` then `continue` — when a channel fails, its error is
   printed with which channel it was, and `continue` skips the rest of
   *this* loop iteration, jumping straight to the next channel rather than
   stopping the whole batch. Twelve folders means one bad one shouldn't
-  block reshaping the other eleven. Note that a channel that hits this
-  `continue` is never added to `row_counts` at all.
-- When nothing raises, `row_counts[folder_suffix] = row_count` records
-  that channel's count, and the final `print` (outside the `try`) reports
-  success for that channel instead.
-- After the loop, `set(row_counts.values())` collects the distinct row
-  counts seen across every channel that succeeded — a `set` automatically
-  drops duplicates, so if every channel produced the same count, this set
-  has exactly one element. `len(...) > 1` checks for more than one
-  distinct count, i.e. at least one channel disagrees with the others; the
-  `row_counts and` before it just guards against running this check (and
-  printing a confusing warning) when the batch found zero successful
-  channels at all. If the counts do disagree, every channel's count is
-  printed so it's clear which one(s) are off.
+  block reshaping the other eleven.
+- When nothing raises, the final `print` (outside the `try`) reports
+  success for that channel, and its row count — which, since
+  `reshape_csv()` guarantees `OUTPUT_ROW_COUNT` rows or an exception,
+  will always read `11992` for every channel that gets this far.
 
 ### The script entry point
 
