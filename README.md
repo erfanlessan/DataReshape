@@ -2,9 +2,10 @@
 
 `program.py` converts a raw data-logger CSV (like `original_csv.csv`) into
 the layout used by `target_format.CSV` (a Graphtec-style instrument
-format). Running it prompts you for the input directory, the input file
-name, the output directory, and the output file name, so you can run it
-once per file and control exactly where each result goes.
+format). `reshape_csv()` handles one file at a time; `main()` batches this
+over a fixed set of per-channel subfolders (IGBT/FRD × UU/UL/VU/VL/WU/WL)
+under a single root directory you're asked for once, writing one named
+output file per channel.
 
 ## What it does
 
@@ -84,36 +85,52 @@ the script will need to be updated to reproduce that formatting.
 python3 program.py
 ```
 
-Running the script (from a terminal or as a Spyder "Run file") prompts
-for four things, in order:
+Running the script (from a terminal or as a Spyder "Run file") asks once
+for the root directory that contains all 12 channel subfolders:
 
 ```
-Directory containing the file to be reshaped: data
-Name of the file to be reshaped: original_csv.csv
-Destination directory for the output: output
-Name to give the output CSV file: my_result.csv
+Root directory containing the channel folders (e.g. .../RawData): C:\...\8_data\RawData
 ```
 
-which reshapes `data/original_csv.csv` and writes the result to
-`output/my_result.csv` (`.csv` is appended automatically if you leave it
-off the output name). Run the script again to process another file.
+It then loops over `CHANNEL_FOLDER_TO_OUTPUT_NAME` (defined near the top
+of `main()` in `program.py`), and for each channel:
+
+1. Searches directly inside the root directory for the one subfolder whose
+   name *ends with* that channel's suffix (e.g. `UU_IGBT` matches
+   `01_UU_IGBT`, whatever numeric prefix it has).
+2. Looks for `lr8400-all-channels.csv` inside that subfolder.
+3. Reshapes it and writes the result to the fixed output directory (also
+   set near the top of `main()`), named after that channel (e.g.
+   `GAVIML00.csv`, `GAVIML01.csv`, ...).
+
+If a channel's folder can't be found (missing, or more than one folder
+matches that suffix), that channel is skipped with a printed message and
+the rest of the batch still runs.
+
+To point this at a different machine's folder layout, edit the constants
+at the top of `main()`:
+
+- `output_dir` — where all the reshaped files get written.
+- `input_filename` — the file name expected inside each channel folder.
+- `CHANNEL_FOLDER_TO_OUTPUT_NAME` — which folder suffix produces which
+  output file name.
+
+### Reshaping a single file instead
+
+`reshape_csv(input_file, output_dir, output_filename)` is the underlying
+function `main()` calls per channel, and remains a plain function you can
+call yourself for one file at a time — from a terminal (after adding a
+small script around it), or interactively from Spyder's console once
+`program.py` has been run (F5) to load it:
+
+```python
+reshape_csv("data/original_csv.csv", "output", "my_result.csv")
+```
 
 ## Using it from Spyder
 
 `input()` works the same in Spyder's IPython console as it does in a
-terminal, so pressing **F5** (Run file) prompts for the same four values
-right there in the console.
-
-If you'd rather skip the prompts and call the reshaping logic directly —
-e.g. to process several files in a loop without re-running the script each
-time — `reshape_csv()` is a plain function you can call yourself once
-`program.py` has been run once (F5) to load it into the console:
-
-```python
-reshape_csv("data/original_csv.csv", "output", "my_result.csv")
-reshape_csv("data/another_run.csv", "output", "another_result.csv")
-```
-
+terminal, so pressing **F5** (Run file) prompts for the root directory
+right there in the console and runs the same batch described above.
 Relative paths are resolved against Spyder's current working directory
-(shown in its "Files"/toolbar, and changeable there), so either `cd` to
-the folder with your CSVs first or pass full paths.
+(shown in its "Files"/toolbar, and changeable there).

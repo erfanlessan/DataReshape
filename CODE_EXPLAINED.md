@@ -4,14 +4,17 @@ This walks through the file-handling and data-writing part of `program.py`,
 explaining the Python concepts it uses.
 
 > **Note:** this originally described a single `main()` function that did
-> all the file handling itself. `program.py` has since been split into two
-> functions: `reshape_csv(input_file, output_dir, output_filename,
-> template_file)` does the actual file reading/writing (the part walked
-> through below), and `main()` just asks the user four questions with
-> `input()` and passes the answers to `reshape_csv()`. The core logic
-> explained below (the `with` statement, `open()`, reading the header
-> block, the `csv` module, the per-row loop) is unchanged — only which
-> function it lives in, and where its arguments come from, has moved.
+> all the file handling itself. `program.py` has since been split up:
+> `reshape_csv(input_file, output_dir, output_filename, template_file)`
+> does the actual file reading/writing for one file (the part walked
+> through first, below); `find_channel_folder()` locates one channel's
+> input folder by name pattern; and `main()` asks for one root directory,
+> then loops over a fixed channel-to-output-name mapping, calling the
+> other two functions once per channel. The core file-handling logic
+> explained first below (the `with` statement, `open()`, reading the
+> header block, the `csv` module, the per-row loop) is unchanged — only
+> which function it lives in, and where its arguments come from, has
+> moved.
 
 ## The `open()` function
 
@@ -251,33 +254,115 @@ one output row per input row. After the loop, line 103 (`return
 output_file`) hands back the path that was written, so callers (like
 `main()`, below) can report it.
 
-## `main()` — asking for the four inputs
+## `CHANNEL_FOLDER_TO_OUTPUT_NAME` — the batch's mapping
+
+```python
+CHANNEL_FOLDER_TO_OUTPUT_NAME = {
+    "UU_IGBT": "GAVIML00",
+    "UL_IGBT": "GAVIML01",
+    ...
+    "WL_FRD": "GAVIML11",
+}
+```
+
+A plain dictionary, defined at module level (not inside any function) so
+both `find_channel_folder()` and `main()` can see it. Each key is a
+channel folder's name *suffix* (see below for why not the whole name);
+each value is the output file name that channel should produce. Being a
+`dict` also fixes an order — Python dictionaries remember insertion
+order — which is what lets `main()`'s loop process channels in this same
+order every run.
+
+## `find_channel_folder()` — locating a folder without knowing its exact name
+
+```python
+def find_channel_folder(root_dir, folder_suffix):
+    matches = [
+        path for path in glob.glob(os.path.join(root_dir, f"*{folder_suffix}"))
+        if os.path.isdir(path)
+    ]
+    if len(matches) != 1:
+        raise FileNotFoundError(
+            f"Expected exactly one folder ending in '{folder_suffix}' inside "
+            f"{root_dir!r}, found {len(matches)}: {matches}"
+        )
+    return matches[0]
+```
+
+Real channel folders look like `01_UU_IGBT`, `02_UL_IGBT`, etc. — a
+numeric prefix, then the channel name. Rather than assume exactly what
+that prefix looks like for all 12 folders, this searches for it:
+
+- `glob.glob(pattern)` (from the standard-library `glob` module) returns a
+  list of every path on disk that matches a shell-style wildcard pattern.
+  `f"*{folder_suffix}"` — e.g. `"*UU_IGBT"` — means "anything, followed by
+  `UU_IGBT`", so it matches `01_UU_IGBT`, `7_UU_IGBT`, or even `UU_IGBT`
+  on its own, whatever the real prefix turns out to be.
+- `os.path.join(root_dir, f"*{folder_suffix}")` puts that wildcard pattern
+  inside `root_dir`, so only direct subfolders of the given root are
+  searched, not the whole drive.
+- The list comprehension `[path for path in glob.glob(...) if
+  os.path.isdir(path)]` keeps only the matches that are actually folders
+  (`os.path.isdir`), in case a file happened to match the same pattern.
+- `if len(matches) != 1:` — if the search found anything other than
+  *exactly* one folder (zero, meaning it's missing; or more than one,
+  meaning the suffix was ambiguous), this `raise`s a `FileNotFoundError`
+  with a message naming the folder suffix, the root directory searched,
+  and every path it did find — rather than silently guessing which one
+  (if any) was intended.
+- If exactly one match was found, `matches[0]` — the only element of a
+  one-item list — is returned as that channel's folder.
+
+## `main()` — running the batch
 
 ```python
 def main():
-    input_dir = input("Directory containing the file to be reshaped: ").strip()
-    input_filename = input("Name of the file to be reshaped: ").strip()
-    output_dir = input("Destination directory for the output: ").strip()
-    output_filename = input("Name to give the output CSV file: ").strip()
+    output_dir = r"C:\00_Workspaces\1_lithium\2_lithium_frame_1\8_data\ProcessedData1"
+    input_filename = "lr8400-all-channels.csv"
 
-    input_file = os.path.join(input_dir, input_filename)
-    output_file = reshape_csv(input_file, output_dir, output_filename)
-    print(f"Wrote reshaped data to {output_file}")
+    input_root = input("Root directory containing the channel folders (e.g. .../RawData): ").strip()
+
+    for folder_suffix, output_name in CHANNEL_FOLDER_TO_OUTPUT_NAME.items():
+        try:
+            input_dir = find_channel_folder(input_root, folder_suffix)
+            input_file = os.path.join(input_dir, input_filename)
+            output_file = reshape_csv(input_file, output_dir, output_name)
+        except (FileNotFoundError, KeyError) as e:
+            print(f"[{folder_suffix}] SKIPPED: {e}")
+            continue
+        print(f"[{folder_suffix}] Wrote reshaped data to {output_file}")
 ```
 
-- `input("some prompt: ")` is Python's built-in for interactive text
-  input: it prints the prompt string, pauses execution, and returns
-  whatever the user types (as a string) once they press Enter. It works
-  identically whether the code is run from a terminal or from an IDE
-  console like Spyder's — both just wait for you to type something.
-- `.strip()` removes any leading/trailing whitespace (spaces, or an
-  accidentally-included newline) from what was typed, so a stray space
-  before or after a path doesn't break the file lookup.
-- `os.path.join(input_dir, input_filename)` combines the directory and
-  file name the user typed into one path, the same way line 84 does for
-  the output side.
-- The last two lines call `reshape_csv()` with the four collected values
-  and print where the result went.
+- `output_dir` and `input_filename` are fixed for every channel in this
+  batch (same destination folder, same file name expected inside each
+  channel folder), so they're set once as plain local variables rather
+  than asked for.
+- `input()` is still used, but now only once, for the one thing that
+  varies per run: which root directory to search under.
+- `for folder_suffix, output_name in CHANNEL_FOLDER_TO_OUTPUT_NAME.items():`
+  — `.items()` on a dictionary gives you `(key, value)` pairs one at a
+  time; unpacking each pair into two loop variables (`folder_suffix`,
+  `output_name`) is a common pattern for looping over both a dictionary's
+  keys and values together. This runs the loop body once per entry in
+  `CHANNEL_FOLDER_TO_OUTPUT_NAME`, in the order the dictionary was
+  written.
+- `try` / `except (FileNotFoundError, KeyError) as e:` — this is Python's
+  error-handling construct: code that might raise an exception goes under
+  `try`; if it does, execution jumps to the matching `except` block
+  instead of crashing the whole program. Listing two exception types in
+  parentheses means "catch either of these." Here, `find_channel_folder()`
+  can raise `FileNotFoundError` (see above), and `reshape_csv()` can raise
+  `KeyError` if the input file it finds doesn't actually contain a column
+  the mapping expects (e.g. the wrong CSV, or a differently-named
+  channel). `as e` captures whichever exception object was raised, under
+  the name `e`, so its message can be used afterward.
+- `print(...)` then `continue` — when a channel fails, its error is
+  printed with which channel it was, and `continue` skips the rest of
+  *this* loop iteration, jumping straight to the next channel rather than
+  stopping the whole batch. Twelve folders means one bad one shouldn't
+  block reshaping the other eleven.
+- When nothing raises, the `try` block runs to completion and the final
+  `print` (outside the `try`) reports success for that channel instead.
 
 ### The script entry point
 
