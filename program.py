@@ -174,19 +174,6 @@ def main():
             print(f"[{folder_suffix}] SKIPPED: {e}")
             continue
         print(f"[{folder_suffix}] Wrote reshaped data to {output_file}")
-    # Name constant folders
-    output_dir = r"C:\00_Workspaces\1_lithium\2_lithium_frame_1\8_data\ProcessedData1"
-    input_filename = "lr8400-all-channels.csv"
-
-    input_dir = input("Directory containing the file to be reshaped: ").strip()
-    # output_dir = input("Destination directory for the output: ").strip()
-
-    output_filename = input("Name to give the output CSV file: ").strip()
-    # input_filename = input("Name of the file to be reshaped: ").strip()
-
-    input_file = os.path.join(input_dir, input_filename)
-    output_file = reshape_csv(input_file, output_dir, output_filename)
-    print(f"Wrote reshaped data to {output_file}")
 
 
 if __name__ == "__main__":
